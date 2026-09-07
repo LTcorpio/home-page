@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,6 +27,9 @@ type ProbeResult struct {
 var (
 	probeMu    sync.RWMutex
 	probeCache = map[int64]ProbeResult{}
+
+	// probeInFlight 是否有探测轮次在跑（防重入 + 作为 /api/status 的 probing 标记）
+	probeInFlight atomic.Bool
 )
 
 var probeClient = &http.Client{
@@ -97,16 +101,37 @@ func probeOne(rawURL string) ProbeResult {
 	return res
 }
 
-// runProbe 并发探测所有开启探测的卡片（禁用的卡片不参与）
-func runProbe() {
+// startProbeRound 开启一轮探测（异步、可安全并发调用）：
+//   - 同一时刻只允许一轮在跑（手动 / 后台轮询 / 容器操作可能同时触发），抢不到就直接跳过，
+//     让已在跑的那轮出结果即可；
+//   - 接管成功后立即清空旧缓存并标记 probing，随后后台并发探测、**每完成一项就写入缓存**；
+//   - 全部完成后清除 probing 标记。前端据此高频轮询 /api/status 即可「哪个先探测完就先显示」，
+//     且探测期间不会残留上一轮的过期红绿（如断网时旧的全绿）。
+func startProbeRound() bool {
+	if !probeInFlight.CompareAndSwap(false, true) {
+		return false // 已有轮次在跑，复用其结果
+	}
+	probeMu.Lock()
+	probeCache = map[int64]ProbeResult{}
+	probeMu.Unlock()
+	go func() {
+		defer probeInFlight.Store(false)
+		runProbeBody()
+	}()
+	return true
+}
+
+// probing 当前是否有一轮探测在跑（前端据此判断本轮是否已全部完成）
+func probing() bool { return probeInFlight.Load() }
+
+// runProbeBody 并发探测所有开启探测的卡片（禁用的卡片不参与），逐项写入缓存
+func runProbeBody() {
 	items, err := listItems()
 	if err != nil {
 		log.Printf("读取卡片失败，跳过本轮探测: %v", err)
 		return
 	}
 	var wg sync.WaitGroup
-	mu := sync.Mutex{}
-	fresh := map[int64]ProbeResult{}
 	for _, it := range items {
 		if it.Hidden || !it.Probe || it.URL == "" {
 			continue
@@ -115,16 +140,12 @@ func runProbe() {
 		go func(it Item) {
 			defer wg.Done()
 			r := probeOne(it.URL)
-			mu.Lock()
-			fresh[it.ID] = r
-			mu.Unlock()
+			probeMu.Lock()
+			probeCache[it.ID] = r // 单项写入：先探测完的先可见
+			probeMu.Unlock()
 		}(it)
 	}
 	wg.Wait()
-
-	probeMu.Lock()
-	probeCache = fresh
-	probeMu.Unlock()
 }
 
 func probeResult(id int64) (ProbeResult, bool) {
@@ -156,8 +177,13 @@ func probeInterval() time.Duration {
 	return time.Duration(n) * time.Second
 }
 
-// clearProbeCache 关闭轮询时清空结果，前端不再显示历史在线状态
+// clearProbeCache 关闭轮询时清空结果，前端不再显示历史在线状态。
+// 若已有探测轮次在跑则跳过：该轮接管时已清空缓存，且马上就会产出新结果，
+// 此时再清只会打断它、留下与「最新卡片清单」不一致的残留。
 func clearProbeCache() {
+	if probing() {
+		return
+	}
 	probeMu.Lock()
 	probeCache = map[int64]ProbeResult{}
 	probeMu.Unlock()
@@ -166,7 +192,7 @@ func clearProbeCache() {
 // startProbeLoop 后台定时探测：每轮按最新设置取间隔，改动即时生效；间隔为 0 时停止轮询
 func startProbeLoop() {
 	if iv := probeInterval(); iv > 0 {
-		runProbe()
+		startProbeRound()
 	} else {
 		clearProbeCache()
 	}
@@ -184,14 +210,17 @@ func startProbeLoop() {
 			if lastZero {
 				// 从关闭恢复：立即探测一次，不用等满一个间隔
 				lastZero = false
-				runProbe()
+				startProbeRound()
 				continue
 			}
 			select {
 			case <-probeWake: // 设置变更后不等满一轮立即重排
 			case <-time.After(iv):
 			}
-			runProbe()
+			if probeInterval() <= 0 {
+				continue // 期间已被改为关闭轮询：回到循环顶部走 clear+等待，不再多跑一轮
+			}
+			startProbeRound() // 异步：上一轮未跑完时自动跳过，避免并发轮次互相清空
 		}
 	}()
 	log.Printf("服务探测已启动（间隔可在管理后台调整，设为 0 关闭轮询）")
