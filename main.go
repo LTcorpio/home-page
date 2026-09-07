@@ -1,0 +1,642 @@
+package main
+
+import (
+	"embed"
+	"encoding/json"
+	"io"
+	"io/fs"
+	"log"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
+
+//go:embed all:web
+var webFS embed.FS
+
+// ---------------------------------------------------------------- 工具
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("写响应失败: %v", err)
+	}
+}
+
+func writeErr(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+func readJSON(r *http.Request, v any) error {
+	defer r.Body.Close()
+	return json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(v)
+}
+
+func pathID(r *http.Request, name string) (int64, error) {
+	return strconv.ParseInt(r.PathValue(name), 10, 64)
+}
+
+// userGroups 预留：从反代注入的身份头读取用户组（当前未启用鉴权，仅做记录与过滤准备）
+func userGroups(r *http.Request) []string {
+	raw := r.Header.Get("Remote-Groups")
+	if raw == "" {
+		raw = r.Header.Get("X-Remote-Groups")
+	}
+	out := []string{}
+	for _, g := range strings.Split(raw, ",") {
+		if g = strings.TrimSpace(g); g != "" {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// ---------------------------------------------------------------- 页面
+
+func serveIndex(w http.ResponseWriter, r *http.Request) {
+	b, err := webFS.ReadFile("web/index.html")
+	if err != nil {
+		http.Error(w, "首页缺失", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(b)
+}
+
+func serveAdmin(w http.ResponseWriter, r *http.Request) {
+	b, err := webFS.ReadFile("web/admin.html")
+	if err != nil {
+		http.Error(w, "管理页缺失", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(b)
+}
+
+// ---------------------------------------------------------------- 看板
+
+type boardGroup struct {
+	Group
+	Items []Item `json:"items"`
+}
+
+func handleBoard(w http.ResponseWriter, r *http.Request) {
+	groups, err := listGroups()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	items, err := listItems()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	ug := userGroups(r)
+	showDisabled := getSetting("show_disabled") == "1"
+	byGroup := map[int64][]Item{}
+	for _, it := range items {
+		if it.Hidden && !showDisabled {
+			continue
+		}
+		if !it.allows(ug) {
+			continue
+		}
+		it.Memo = "" // 备忘录仅管理端可见，公开看板不返回
+		byGroup[it.GroupID] = append(byGroup[it.GroupID], it)
+	}
+	out := make([]boardGroup, 0, len(groups)+1)
+	for _, g := range groups {
+		its := byGroup[g.ID]
+		if its == nil {
+			its = []Item{}
+		}
+		out = append(out, boardGroup{Group: g, Items: its})
+	}
+	// 未分组卡片兜底展示
+	if loose := byGroup[0]; len(loose) > 0 {
+		out = append(out, boardGroup{Group: Group{ID: 0, Name: "未分组", Sort: 9999}, Items: loose})
+	}
+	settings, err := listSettings()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{
+		"settings": settings,
+		"groups":   out,
+		"features": map[string]bool{
+			"docker": getSetting("docker_enabled") == "1" && dockerAvailable(),
+		},
+		"now": time.Now().Format("2006-01-02 15:04:05"),
+	})
+}
+
+// ---------------------------------------------------------------- 状态
+
+func handleStatus(w http.ResponseWriter, r *http.Request) {
+	items, err := listItems()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	ug := userGroups(r)
+	status := map[string]ProbeResult{}
+	names := []string{}
+	for _, it := range items {
+		if it.Hidden || !it.allows(ug) {
+			continue
+		}
+		if res, ok := probeResult(it.ID); ok {
+			status[strconv.FormatInt(it.ID, 10)] = res
+		}
+		if it.ContainerName != "" {
+			names = append(names, it.ContainerName)
+		}
+	}
+	sort.Strings(names)
+	refreshContainers()
+	writeJSON(w, map[string]any{
+		"items":      status,
+		"containers": whitelistContainers(names),
+		"updated":    time.Now().Format("15:04:05"),
+	})
+}
+
+func handleProbeNow(w http.ResponseWriter, _ *http.Request) {
+	runProbe()
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+// ---------------------------------------------------------------- 容器
+
+// containerWhitelist 卡片里绑定过的容器名（白名单）
+func containerWhitelist() []string {
+	items, err := listItems()
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := []string{}
+	for _, it := range items {
+		if it.ContainerName != "" && !seen[it.ContainerName] {
+			seen[it.ContainerName] = true
+			out = append(out, it.ContainerName)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func handleContainerAction(w http.ResponseWriter, r *http.Request) {
+	if getSetting("docker_enabled") != "1" {
+		writeErr(w, 403, "Docker 控制未启用")
+		return
+	}
+	name := r.PathValue("name")
+	action := r.PathValue("action")
+	allowed := false
+	for _, n := range containerWhitelist() {
+		if n == name {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		writeErr(w, 403, "该容器不在白名单内，请先在卡片里绑定容器名")
+		return
+	}
+	// 禁止对 home-page 自身执行操作，避免把自己停掉后打不开页面
+	ctMu.RLock()
+	target := ctCache[name]
+	ctMu.RUnlock()
+	if isSelfContainer(name, target.ID) {
+		writeErr(w, 403, "不能对 home-page 自身容器执行该操作")
+		return
+	}
+	if err := dockerAction(name, action); err != nil {
+		log.Printf("容器操作失败 %s/%s: %v", name, action, err)
+		writeErr(w, 500, err.Error())
+		return
+	}
+	refreshContainers()
+	ctMu.Lock()
+	ctLastPick = time.Time{} // 强制下次立即刷新
+	ctMu.Unlock()
+	refreshContainers()
+	runProbe()
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+func handleContainerList(w http.ResponseWriter, _ *http.Request) {
+	if !dockerAvailable() {
+		writeJSON(w, map[string]any{"available": false, "containers": map[string]Container{}})
+		return
+	}
+	refreshContainers()
+	ctMu.RLock()
+	err := ctErr
+	ctMu.RUnlock()
+	writeJSON(w, map[string]any{
+		"available":  true,
+		"containers": whitelistContainers(containerWhitelist()),
+		"error":      err,
+	})
+}
+
+// ---------------------------------------------------------------- 分组 API
+
+func handleGroups(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		groups, err := listGroups()
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, groups)
+	case http.MethodPost:
+		var g Group
+		if err := readJSON(r, &g); err != nil {
+			writeErr(w, 400, "请求格式错误")
+			return
+		}
+		if strings.TrimSpace(g.Name) == "" {
+			writeErr(w, 400, "分组名不能为空")
+			return
+		}
+		groups, _ := listGroups()
+		g.Sort = len(groups)
+		id, err := createGroup(g)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		g.ID = id
+		writeJSON(w, g)
+	}
+}
+
+func handleGroupByID(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeErr(w, 400, "ID 非法")
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var g Group
+		if err := readJSON(r, &g); err != nil {
+			writeErr(w, 400, "请求格式错误")
+			return
+		}
+		g.ID = id
+		if strings.TrimSpace(g.Name) == "" {
+			writeErr(w, 400, "分组名不能为空")
+			return
+		}
+		if err := updateGroup(g); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, g)
+	case http.MethodDelete:
+		if err := deleteGroup(id); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	}
+}
+
+func handleGroupSort(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, 400, "请求格式错误")
+		return
+	}
+	if err := reorderGroups(req.IDs); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+// ---------------------------------------------------------------- 卡片 API
+
+func handleItems(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		items, err := listItems()
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, items)
+	case http.MethodPost:
+		var it Item
+		if err := readJSON(r, &it); err != nil {
+			writeErr(w, 400, "请求格式错误")
+			return
+		}
+		if strings.TrimSpace(it.Name) == "" {
+			writeErr(w, 400, "名称不能为空")
+			return
+		}
+		if it.IconType == "" {
+			it.IconType = "auto"
+		}
+		if it.IconType == "upload" && it.IconValue == "" {
+			it.IconType = "auto"
+		}
+		items, _ := listItems()
+		for _, x := range items {
+			if x.GroupID == it.GroupID && x.Sort >= it.Sort {
+				it.Sort = x.Sort + 1
+			}
+		}
+		id, err := createItem(it)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		// 回读一次，返回带时间戳与图标地址的完整记录
+		if full, err := getItem(id); err == nil && full != nil {
+			writeJSON(w, full)
+			return
+		}
+		it.ID = id
+		it.IconURL = it.iconURL()
+		writeJSON(w, it)
+	}
+}
+
+func handleItemByID(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeErr(w, 400, "ID 非法")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		it, err := getItem(id)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if it == nil {
+			writeErr(w, 404, "卡片不存在")
+			return
+		}
+		writeJSON(w, it)
+	case http.MethodPut:
+		var it Item
+		if err := readJSON(r, &it); err != nil {
+			writeErr(w, 400, "请求格式错误")
+			return
+		}
+		it.ID = id
+		if strings.TrimSpace(it.Name) == "" {
+			writeErr(w, 400, "名称不能为空")
+			return
+		}
+		if it.IconType == "" {
+			it.IconType = "auto"
+		}
+		if err := updateItem(it); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		it.IconURL = it.iconURL()
+		writeJSON(w, it)
+	case http.MethodDelete:
+		if err := deleteItem(id); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	}
+}
+
+func handleItemSort(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		GroupID int64   `json:"group_id"`
+		IDs     []int64 `json:"ids"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, 400, "请求格式错误")
+		return
+	}
+	if err := reorderItems(req.GroupID, req.IDs); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+// ---------------------------------------------------------------- 设置
+
+func handleSettings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s, err := listSettings()
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, s)
+	case http.MethodPut:
+		var kv map[string]string
+		if err := readJSON(r, &kv); err != nil {
+			writeErr(w, 400, "请求格式错误")
+			return
+		}
+		// 只允许更新已知配置项
+		clean := map[string]string{}
+		for k, v := range kv {
+			if _, ok := defaultSettings[k]; ok {
+				clean[k] = v
+			}
+		}
+		if err := saveSettings(clean); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		wakeProbe() // 探测间隔等设置即时生效
+		s, _ := listSettings()
+		writeJSON(w, s)
+	}
+}
+
+// ---------------------------------------------------------------- 图标
+
+func handleIconUpload(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(4 << 20); err != nil {
+		writeErr(w, 400, "上传解析失败")
+		return
+	}
+	f, header, err := r.FormFile("file")
+	if err != nil {
+		writeErr(w, 400, "缺少文件字段 file")
+		return
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, 2<<20))
+	if err != nil {
+		writeErr(w, 500, "读取文件失败")
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".svg", ".ico", ".webp", ".gif":
+	case "":
+		ext = extByContent(data)
+	default:
+		writeErr(w, 400, "不支持的图片类型: "+ext)
+		return
+	}
+	name, err := saveIcon(data, ext)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"icon_type": "upload", "icon_value": name, "icon_url": "/icons/" + name})
+}
+
+func extByContent(data []byte) string {
+	ct := http.DetectContentType(data)
+	if e, ok := allowedExt[strings.Split(ct, ";")[0]]; ok {
+		return e
+	}
+	return ".png"
+}
+
+// handleIconFetch 抓取站点 favicon 并固化为本地图标（可选绑定 item_id）
+func handleIconFetch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL    string `json:"url"`
+		ItemID int64  `json:"item_id"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, 400, "请求格式错误")
+		return
+	}
+	target := req.URL
+	if req.ItemID > 0 {
+		if it, err := getItem(req.ItemID); err == nil && it != nil && target == "" {
+			target = it.URL
+		}
+	}
+	data, ext, err := fetchFavicon(target)
+	if err != nil {
+		writeErr(w, 502, "抓取失败: "+err.Error())
+		return
+	}
+	name, err := saveIcon(data, ext)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if req.ItemID > 0 {
+		if it, err := getItem(req.ItemID); err == nil && it != nil {
+			it.IconType = "upload"
+			it.IconValue = name
+			_ = updateItem(*it)
+		}
+	}
+	writeJSON(w, map[string]string{"icon_type": "upload", "icon_value": name, "icon_url": "/icons/" + name})
+}
+
+// handleIconProxy 按 URL 代抓 favicon 并缓存，供 icon_type=auto 的卡片使用
+func handleIconProxy(w http.ResponseWriter, r *http.Request) {
+	rawURL := r.URL.Query().Get("url")
+	if rawURL == "" {
+		http.Error(w, "缺少 url", http.StatusBadRequest)
+		return
+	}
+	key := cacheKeyFor(rawURL)
+	if cached := findCachedIcon(key); cached != "" {
+		http.ServeFile(w, r, filepath.Join(iconDir, cached))
+		return
+	}
+	data, ext, err := fetchFavicon(rawURL)
+	if err != nil {
+		// 抓取失败返回非图片 404，让前端 img 触发 onerror 回退到首字母色块
+		http.Error(w, "icon not found", http.StatusNotFound)
+		return
+	}
+	name, err := saveIcon(data, ext)
+	if err != nil {
+		http.Error(w, "图标保存失败", http.StatusInternalServerError)
+		return
+	}
+	http.ServeFile(w, r, filepath.Join(iconDir, name))
+}
+
+// ---------------------------------------------------------------- 导入
+
+// ---------------------------------------------------------------- 启动
+
+// noStore 静态资源不做缓存：go:embed 无真实修改时间，避免浏览器命中陈旧 JS/CSS
+func noStore(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func main() {
+	initStore()
+	startProbeLoop()
+	startContainerLoop()
+
+	webRoot, err := fs.Sub(webFS, "web")
+	if err != nil {
+		log.Fatalf("加载前端资源失败: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("GET /assets/", noStore(http.FileServer(http.FS(webRoot))))
+	mux.Handle("GET /icons/", http.StripPrefix("/icons/", http.FileServer(http.Dir(iconDir))))
+	mux.HandleFunc("GET /{$}", serveIndex) // 仅精确匹配根路径，其余路径 404
+	mux.HandleFunc("GET /admin", serveAdmin)
+
+	mux.HandleFunc("GET /api/board", handleBoard)
+	mux.HandleFunc("GET /api/status", handleStatus)
+	mux.HandleFunc("POST /api/probe", handleProbeNow)
+	mux.HandleFunc("GET /api/containers", handleContainerList)
+	mux.HandleFunc("POST /api/containers/{name}/{action}", handleContainerAction)
+	mux.HandleFunc("/api/groups", handleGroups)
+	mux.HandleFunc("/api/groups/sort", handleGroupSort)
+	mux.HandleFunc("/api/groups/{id}", handleGroupByID)
+	mux.HandleFunc("/api/items", handleItems)
+	mux.HandleFunc("/api/items/sort", handleItemSort)
+	mux.HandleFunc("/api/items/{id}", handleItemByID)
+	mux.HandleFunc("/api/settings", handleSettings)
+	mux.HandleFunc("POST /api/icons/upload", handleIconUpload)
+	mux.HandleFunc("POST /api/icons/fetch", handleIconFetch)
+	mux.HandleFunc("GET /api/icons/proxy", handleIconProxy)
+
+	addr := ":" + envOr("PORT", "80")
+	log.Printf("home-page 启动于 %s（数据目录 %s）", addr, dataDir)
+	if err := http.ListenAndServe(addr, mux); err != nil {
+		log.Fatalf("服务退出: %v", err)
+	}
+}
