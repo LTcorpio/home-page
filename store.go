@@ -161,6 +161,7 @@ var defaultSettings = map[string]string{
 	"site_title":       "Home",
 	"docker_enabled":   "1",
 	"probe_interval":   "20", // 秒，改动即时生效
+	"probe_on_open":    "1",  // 打开首页时立即触发一轮探测；0=不自动，仅靠右上角刷新按钮
 	"show_disabled":    "0",  // 禁用的卡片是否仍在首页显示（置灰）；0=不显示
 	"background_image": "",   // 壁纸地址，如 /icons/bg.jpg；留空用深色渐变兜底
 	"background_mask":  "0",  // 壁纸上的黑色遮罩透明度 0~1
