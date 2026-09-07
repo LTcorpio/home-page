@@ -314,6 +314,7 @@ function renderSettings() {
   el('setMaxWidth').value = s.max_width || 1200;
   el('setDocker').checked = s.docker_enabled !== '0';
   el('setShowDisabled').checked = s.show_disabled === '1';
+  el('setShowDisabledGuest').checked = s.show_disabled_guest === '1';
   const b = el('dockerBadge');
   b.textContent = state.features.docker ? 'Docker 已就绪' : 'Docker 未启用';
   b.className = 'badge ' + (state.features.docker ? 'on' : 'off');
@@ -328,6 +329,7 @@ async function saveSettings() {
     max_width: el('setMaxWidth').value,
     docker_enabled: el('setDocker').checked ? '1' : '0',
     show_disabled: el('setShowDisabled').checked ? '1' : '0',
+    show_disabled_guest: el('setShowDisabledGuest').checked ? '1' : '0',
   });
   await reload();
   toast('设置已保存');

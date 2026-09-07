@@ -151,12 +151,20 @@ func handleBoard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ug := userGroups(r)
-	showDisabled := getSetting("show_disabled") == "1"
+	showDisabled := getSetting("show_disabled") == "1"            // 本机(管理员)视角
+	showDisabledGuest := getSetting("show_disabled_guest") == "1" // 访客视角
 	isAdmin := isAdminRequest(r)
 	byGroup := map[int64][]Item{}
 	for _, it := range items {
-		if it.Hidden && !showDisabled {
-			continue
+		if it.Hidden {
+			// 禁用卡显示与否按视角取各自的开关：管理员/访客互不影响
+			show := showDisabledGuest
+			if isAdmin {
+				show = showDisabled
+			}
+			if !show {
+				continue
+			}
 		}
 		if !it.allows(ug) {
 			continue

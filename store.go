@@ -158,13 +158,14 @@ func tableHasColumn(table, col string) bool {
 
 // defaultSettings 站点级配置默认值（视觉对齐 Sun-Panel）
 var defaultSettings = map[string]string{
-	"site_title":       "Home",
-	"docker_enabled":   "1",
-	"show_disabled":    "0", // 禁用的卡片是否仍在首页显示（置灰）；0=不显示
-	"background_image": "",  // 壁纸地址，如 /icons/bg.jpg；留空用深色渐变兜底
-	"background_mask":  "0", // 壁纸上的黑色遮罩透明度 0~1
-	"background_blur":  "2", // 壁纸模糊 px
-	"max_width":        "1200",
+	"site_title":          "Home",
+	"docker_enabled":      "1",
+	"show_disabled":       "1", // 本机(管理员)首页是否置灰显示禁用卡；1=显示（便于管理核对）
+	"show_disabled_guest": "0", // 访客首页是否置灰显示禁用卡；0=不显示（访客看不到，仅管理员可选开）
+	"background_image":    "",  // 壁纸地址，如 /icons/bg.jpg；留空用深色渐变兜底
+	"background_mask":     "0", // 壁纸上的黑色遮罩透明度 0~1
+	"background_blur":     "2", // 壁纸模糊 px
+	"max_width":           "1200",
 }
 
 // seed 首次运行写入默认设置与示例数据（库中已有分组时不重复写入）
