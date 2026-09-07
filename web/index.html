@@ -23,14 +23,15 @@
     <a class="float-btn" id="adminLink" href="/admin" title="管理后台" style="display:none">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </a>
-    <!-- 自动探测设置（前端偏好，存本机浏览器） -->
+    <!-- 页面偏好（自动探测 + 时钟显示；存本机浏览器，仅当前设备生效） -->
     <div class="float-group">
-      <button class="float-btn" id="setBtn" title="自动探测设置">
+      <button class="float-btn" id="setBtn" title="页面偏好设置">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M2 14h4"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>
       </button>
       <div class="set-pop" id="setPop" style="display:none">
-        <div class="set-title">自动探测设置</div>
-        <div class="set-desc">状态点由浏览器直连当前地址判定；以下偏好保存在本机浏览器，仅对当前设备生效。</div>
+        <div class="set-title">页面偏好</div>
+        <div class="set-desc">以下偏好保存在本机浏览器，仅对当前设备生效。</div>
+        <div class="sec first">自动探测</div>
         <div class="srow">
           <span class="lbl">自动重探间隔</span>
           <div class="right">
@@ -49,6 +50,17 @@
           </div>
         </div>
         <div class="hint">开启后每次打开首页先立即探测一轮，无需等待自动重探。</div>
+        <div class="sec">时钟显示</div>
+        <div class="srow">
+          <span class="lbl">显示秒</span>
+          <div class="right">
+            <label class="switch">
+              <input type="checkbox" id="setClockSec" />
+              <span class="track"></span>
+            </label>
+          </div>
+        </div>
+        <div class="hint">开启后时间显示到秒（HH:MM:SS），关闭仅显示时:分；日期固定为完整格式（如 2026-09-08 星期二）。</div>
         <div class="sfoot">
           <button class="btn" id="setReset">恢复默认</button>
           <div class="grow"></div>
@@ -64,7 +76,7 @@
     <div class="header" id="header">
       <div class="clock text-shadow">
         <div class="clock-time" id="clockTime">--:--</div>
-        <div class="clock-date"><span id="clockDate">---</span> <span id="clockWeek">-</span></div>
+        <div class="clock-date"><span id="clockDate">---- -- --</span><span id="clockWeek">星期-</span></div>
       </div>
     </div>
 
