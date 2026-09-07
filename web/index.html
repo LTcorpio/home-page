@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Home</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+</head>
+<body>
+  <!-- 壁纸与遮罩 -->
+  <div class="wallpaper" id="wallpaper"></div>
+  <div class="mask" id="mask"></div>
+
+  <!-- 右上角浮动条：网络模式 + 管理入口 -->
+  <div class="float-bar">
+    <button class="net-chip" id="netMode" title="点击切换访问地址模式">自动</button>
+    <a class="float-btn" href="/admin" title="管理后台">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </a>
+  </div>
+
+  <div class="scroll-wrap">
+  <div class="page">
+    <!-- 头部：仅日期与时间 -->
+    <div class="header" id="header">
+      <div class="clock text-shadow">
+        <div class="clock-time" id="clockTime">--:--</div>
+        <div class="clock-date"><span id="clockDate">---</span> <span id="clockWeek">-</span></div>
+      </div>
+    </div>
+
+    <!-- 分组与卡片 -->
+    <main class="board" id="board">
+      <div class="empty">加载中…</div>
+    </main>
+  </div>
+  </div>
+
+  <!-- 卡片右键菜单：容器启停 -->
+  <div class="ctx-menu" id="ctxMenu" style="display:none"></div>
+
+  <div class="toast" id="toast"></div>
+  <script src="/assets/home.js"></script>
+</body>
+</html>
