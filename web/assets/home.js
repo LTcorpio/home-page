@@ -1,10 +1,11 @@
 /* home-page 首页：状态轮询 + 时钟 + 卡片（左键打开 / 右键容器操作），视觉对齐 Sun-Panel */
 
-  const state = {
+const state = {
   settings: {},
   groups: [],
   features: { docker: false, admin: false },
   status: { items: {}, containers: {} },
+  probingRequest: false, // 手动/自动探测请求在飞（用于等待态的呼吸点）
 };
 
 const el = (id) => document.getElementById(id);
@@ -359,23 +360,24 @@ function applyStatus() {
       }
     }
 
-    // 状态点：轮询关闭/禁用/未开启探测 → 常亮灰点不闪烁；探测进行中 → 淡入淡出；在线/离线 → 对应颜色
-    const probing = String(state.settings.probe_interval ?? 20) !== '0';
+    // 状态点：只要本轮探测完毕（缓存里有 checked 结果）就展示 在线绿 / 离线红，
+    // 不依赖后台轮询开关（手动刷新/打开页面自动探测的结果同样红绿展示）。
+    // 尚无结果时：后台轮询开启或有探测请求在飞 → 呼吸等待；其余常亮灰点。
+    const background = String(state.settings.probe_interval ?? 20) !== '0';
+    const pendingWait = !!state.probingRequest || background;
     dot.className = 'dot';
-    if (!probing || (it && it.hidden)) {
+    if (it && it.hidden) {
       dot.classList.add('idle');
-    } else if (res && res.online) {
-      dot.classList.add('online');
-    } else if (res && res.checked && !res.online) {
-      dot.classList.add('offline');
-    } else if (it && it.probe) {
+    } else if (res && res.checked) {
+      dot.classList.add(res.online ? 'online' : 'offline');
+    } else if (it && it.probe && pendingWait) {
       dot.classList.add('pending');
     } else {
       dot.classList.add('idle');
     }
 
-    // 不可点击态：探测离线（轮询关闭时不判断）或绑定容器未运行（始终判断）
-    card.classList.toggle('dead', (probing && dead) || cDown);
+    // 不可点击态：探测完毕且离线，或绑定容器未运行（两者都始终判断，与轮询开关无关）
+    card.classList.toggle('dead', dead || cDown);
     if (it && it.hidden) card.classList.add('disabled');
   });
 }
@@ -394,13 +396,16 @@ async function refreshStatus() {
 // 触发一轮探测并刷新状态（右上角刷新按钮 / 打开页面按设置自动触发）
 async function probeNow() {
   const svg = el('refreshBtn').querySelector('svg');
+  state.probingRequest = true; // 探测期间让尚未有结果的卡片显示呼吸等待点
+  applyStatus();
   svg.classList.add('spin');
   try {
     await api('/api/probe', { method: 'POST' });
-    await refreshStatus();
+    await refreshStatus(); // 结果落缓存后按 红/绿 刷新各卡片状态点
   } catch (e) {
     toast(`探测失败: ${e.message}`);
   } finally {
+    state.probingRequest = false;
     svg.classList.remove('spin');
   }
 }
