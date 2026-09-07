@@ -36,8 +36,18 @@
   </div>
   </div>
 
-  <!-- 卡片右键菜单：容器启停 -->
+  <!-- 卡片右键菜单：容器启停 + 备注（管理员） -->
   <div class="ctx-menu" id="ctxMenu" style="display:none"></div>
+
+  <!-- 备注查看浮层（管理员右键菜单进入） -->
+  <div class="memo-mask" id="memoMask" style="display:none">
+    <div class="memo-pop">
+      <div class="memo-head"><span id="memoTitle">备注</span><button class="memo-close" id="memoClose" title="关闭">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button></div>
+      <div class="memo-body" id="memoBody"></div>
+    </div>
+  </div>
 
   <div class="toast" id="toast"></div>
   <script src="/assets/home.js"></script>
