@@ -104,19 +104,19 @@
                 <div class="sub">0 = 关闭轮询；最小值 5 秒。改动即时生效，无需重启。</div>
               </div>
               <div class="field">
-                <label>打开页面时立即探测</label>
-                <select id="setProbeOnOpen"><option value="1">开启</option><option value="0">关闭</option></select>
-                <div class="sub">开启后每次打开首页自动触发一轮探测；也可点右上角刷新按钮手动触发。</div>
+                <span class="lbl">打开页面时立即探测</span>
+                <label class="switch" title="开启 / 关闭"><input type="checkbox" id="setProbeOnOpen" /><span class="track"></span></label>
+                <div class="sub">开启：每次打开首页自动触发一轮探测；关闭：仅点右上角刷新按钮时手动探测。</div>
               </div>
               <div class="field">
-                <label>Docker 启停控制</label>
-                <select id="setDocker"><option value="1">启用</option><option value="0">停用</option></select>
-                <div class="sub">卡片绑定容器后，右键卡片即可启停。</div>
+                <span class="lbl">Docker 启停控制</span>
+                <label class="switch" title="启用 / 停用"><input type="checkbox" id="setDocker" /><span class="track"></span></label>
+                <div class="sub">开启：卡片绑定容器后，右键卡片即可启停。</div>
               </div>
               <div class="field">
-                <label>禁用卡片显示</label>
-                <select id="setShowDisabled"><option value="1">首页置灰显示</option><option value="0">不显示</option></select>
-                <div class="sub">设为「首页置灰显示」时，被禁用的卡片仍可见但不可打开。</div>
+                <span class="lbl">首页置灰显示禁用卡片</span>
+                <label class="switch" title="开启 / 关闭"><input type="checkbox" id="setShowDisabled" /><span class="track"></span></label>
+                <div class="sub">开启：被禁用的卡片仍在首页置灰显示（不可打开）；关闭：直接隐藏。</div>
               </div>
             </div>
           </div>
@@ -138,7 +138,7 @@
         <div class="field"><label>本机地址（localhost）</label><input type="url" id="fLanUrl" placeholder="http://localhost:5197（可选）" /></div>
         <div class="field full"><label>描述</label><input type="text" id="fDesc" /></div>
         <div class="field"><label>分组</label><select id="fGroup"></select></div>
-        <div class="field"><label>状态</label><select id="fStatus"><option value="1">启用</option><option value="0">禁用</option></select></div>
+        <div class="field"><span class="lbl">启用</span><label class="switch" title="启用 / 禁用"><input type="checkbox" id="fStatus" checked /><span class="track"></span></label></div>
         <div class="field"><label>图标类型</label><select id="fIconType">
           <option value="auto">自动抓取 favicon</option>
           <option value="upload">上传图片</option>
@@ -158,7 +158,9 @@
             <button class="btn mini" id="doUpload">上传</button>
           </div>
         </div>
-        <div class="field"><label>状态探测</label><select id="fProbe"><option value="1">开启</option><option value="0">关闭</option></select></div>
+        <div class="field"><span class="lbl">状态探测</span><label class="switch" title="开启 / 关闭"><input type="checkbox" id="fProbe" checked /><span class="track"></span></label>
+          <div class="sub">开启：探测可达性，离线时卡片置灰不可点。</div>
+        </div>
         <div class="field"><label>访问组（预留）</label><input type="text" id="fAcl" placeholder="逗号分隔，留空=公开" /></div>
         <div class="field full"><label>备忘录（仅管理后台可见，可记录凭证）</label><textarea id="fMemo" rows="3" placeholder="例如：后台账号 / 端口说明 / 续费提醒…"></textarea></div>
       </div>
