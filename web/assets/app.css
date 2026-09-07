@@ -124,6 +124,7 @@ body.no-select, body.no-select * { user-select: none; -webkit-user-select: none;
   justify-content: center;
   width: 32px;
   height: 32px;
+  border: none;
   border-radius: 999px;
   background: var(--card-bg);
   color: var(--text-dim);
@@ -132,9 +133,17 @@ body.no-select, body.no-select * { user-select: none; -webkit-user-select: none;
   transition: color .15s, background .15s;
 }
 
+.float-btn svg { display: block; }
+.float-btn svg.spin { animation: rot .7s linear infinite; }
+
+@keyframes rot { to { transform: rotate(360deg); } }
+
 .float-btn:hover { color: var(--text); background: var(--card-bg-hover); }
 
 .net-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: none;
   padding: 5px 12px;
   border-radius: 999px;
@@ -146,6 +155,7 @@ body.no-select, body.no-select * { user-select: none; -webkit-user-select: none;
   transition: color .15s, background .15s;
 }
 
+.net-chip svg { flex: none; }
 .net-chip:hover { color: var(--text); background: var(--card-bg-hover); }
 
 /* ---------------------------------------------------------------- 主体列 */
@@ -317,7 +327,9 @@ body.no-select, body.no-select * { user-select: none; -webkit-user-select: none;
 }
 
 .ctx-menu button {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 9px;
   width: 100%;
   text-align: left;
   border: none;
@@ -329,7 +341,20 @@ body.no-select, body.no-select * { user-select: none; -webkit-user-select: none;
   cursor: pointer;
 }
 
+.ctx-menu button .ci {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  flex: none;
+  opacity: .85;
+}
+
+.ctx-menu button svg { display: block; }
+.ctx-menu button .ct { line-height: 1.4; }
+
 .ctx-menu button:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+.ctx-menu button:hover .ci { opacity: 1; }
 .ctx-menu button.danger:hover { color: var(--bad); }
 
 /* 备注查看浮层（首页管理员模式） */

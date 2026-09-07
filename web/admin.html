@@ -104,6 +104,11 @@
                 <div class="sub">0 = 关闭轮询；最小值 5 秒。改动即时生效，无需重启。</div>
               </div>
               <div class="field">
+                <label>打开页面时立即探测</label>
+                <select id="setProbeOnOpen"><option value="1">开启</option><option value="0">关闭</option></select>
+                <div class="sub">开启后每次打开首页自动触发一轮探测；也可点右上角刷新按钮手动触发。</div>
+              </div>
+              <div class="field">
                 <label>Docker 启停控制</label>
                 <select id="setDocker"><option value="1">启用</option><option value="0">停用</option></select>
                 <div class="sub">卡片绑定容器后，右键卡片即可启停。</div>
@@ -139,7 +144,7 @@
           <option value="upload">上传图片</option>
           <option value="text">文字图标</option>
         </select></div>
-        <div class="field"><label>绑定容器</label><input type="text" id="fContainer" placeholder="容器名，右键卡片可启停" /></div>
+        <div class="field"><label>绑定容器</label><input type="text" id="fContainer" placeholder="容器名；一个服务多个容器用英文逗号分隔（如 immich_server,immich_machine_learning）" /></div>
         <div class="field" id="iconTextRow" style="display:none"><label>图标文字</label><input type="text" id="fIconText" placeholder="如：状态 / RIDE" /></div>
         <div class="field" id="uploadRow" style="display:none">
           <label>图标文件</label>

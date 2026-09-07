@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -49,6 +50,22 @@ func readJSON(r *http.Request, v any) error {
 
 func pathID(r *http.Request, name string) (int64, error) {
 	return strconv.ParseInt(r.PathValue(name), 10, 64)
+}
+
+// splitContainers 解析卡片绑定的容器列表：支持英文逗号/中文逗号/空格分隔，去重、去空白
+func splitContainers(raw string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, seg := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '，' || r == ' ' || r == '\t'
+	}) {
+		seg = strings.TrimSpace(seg)
+		if seg != "" && !seen[seg] {
+			seen[seg] = true
+			out = append(out, seg)
+		}
+	}
+	return out
 }
 
 // userGroups 预留：从反代注入的身份头读取用户组（当前未启用鉴权，仅做记录与过滤准备）
@@ -193,7 +210,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 			status[strconv.FormatInt(it.ID, 10)] = res
 		}
 		if it.ContainerName != "" {
-			names = append(names, it.ContainerName)
+			names = append(names, splitContainers(it.ContainerName)...)
 		}
 	}
 	sort.Strings(names)
@@ -212,7 +229,7 @@ func handleProbeNow(w http.ResponseWriter, _ *http.Request) {
 
 // ---------------------------------------------------------------- 容器
 
-// containerWhitelist 卡片里绑定过的容器名（白名单）
+// containerWhitelist 卡片里绑定过的容器名列表（白名单；一张卡片可绑定多个，逗号分隔）
 func containerWhitelist() []string {
 	items, err := listItems()
 	if err != nil {
@@ -221,9 +238,11 @@ func containerWhitelist() []string {
 	seen := map[string]bool{}
 	out := []string{}
 	for _, it := range items {
-		if it.ContainerName != "" && !seen[it.ContainerName] {
-			seen[it.ContainerName] = true
-			out = append(out, it.ContainerName)
+		for _, n := range splitContainers(it.ContainerName) {
+			if !seen[n] {
+				seen[n] = true
+				out = append(out, n)
+			}
 		}
 	}
 	sort.Strings(out)
@@ -284,6 +303,107 @@ func handleContainerList(w http.ResponseWriter, _ *http.Request) {
 		"containers": whitelistContainers(containerWhitelist()),
 		"error":      err,
 	})
+}
+
+// containerOpResult 批量操作中单个容器的结果
+type containerOpResult struct {
+	Name   string `json:"name"`
+	Action string `json:"action"`
+	OK     bool   `json:"ok"`
+	Error  string `json:"error,omitempty"`
+}
+
+// handleItemContainerAction 对卡片绑定的「一个或多个容器」执行启停/重启。
+// 一张卡片（一个服务）可绑定多个容器，操作会覆盖其全部绑定容器：
+//   - stop / restart 的停止阶段：按卡片上声明的顺序（先停主服务，再停依赖，如 immich_server→ml→redis→postgres）
+//   - start / restart 的启动阶段：按声明顺序倒序（先拉起依赖，再拉起主服务）
+func handleItemContainerAction(w http.ResponseWriter, r *http.Request) {
+	if getSetting("docker_enabled") != "1" {
+		writeErr(w, 403, "Docker 控制未启用")
+		return
+	}
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeErr(w, 400, "ID 非法")
+		return
+	}
+	it, err := getItem(id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if it == nil {
+		writeErr(w, 404, "卡片不存在")
+		return
+	}
+	names := splitContainers(it.ContainerName)
+	if len(names) == 0 {
+		writeErr(w, 400, "该卡片未绑定容器")
+		return
+	}
+	action := r.PathValue("action")
+	switch action {
+	case "start", "stop", "restart":
+	default:
+		writeErr(w, 400, "不支持的操作: "+action)
+		return
+	}
+
+	// 安全校验：白名单（绑定即白名单）内禁止对 home-page 自身容器操作，避免把自己停掉
+	ctMu.RLock()
+	for _, n := range names {
+		if isSelfContainer(n, ctCache[n].ID) {
+			ctMu.RUnlock()
+			writeErr(w, 403, "不能对 home-page 自身容器执行该操作")
+			return
+		}
+	}
+	ctMu.RUnlock()
+
+	// 编排操作顺序：stop 按声明序；start 倒序（先依赖后应用）；restart = 先按序停、再倒序启
+	type step struct{ name, act string }
+	plan := []step{}
+	switch action {
+	case "start":
+		for i := len(names) - 1; i >= 0; i-- {
+			plan = append(plan, step{names[i], "start"})
+		}
+	case "stop":
+		for _, n := range names {
+			plan = append(plan, step{n, "stop"})
+		}
+	case "restart":
+		for _, n := range names {
+			plan = append(plan, step{n, "stop"})
+		}
+		for i := len(names) - 1; i >= 0; i-- {
+			plan = append(plan, step{names[i], "start"})
+		}
+	}
+
+	results := make([]containerOpResult, 0, len(names))
+	firstErr := ""
+	for _, st := range plan {
+		res := containerOpResult{Name: st.name, Action: st.act}
+		if err := dockerAction(st.name, st.act); err != nil {
+			res.Error = err.Error()
+			if firstErr == "" {
+				firstErr = fmt.Sprintf("容器 %s %s 失败: %s", st.name, st.act, err.Error())
+			}
+			log.Printf("容器操作失败 %s/%s: %v", st.name, st.act, err)
+		} else {
+			res.OK = true
+		}
+		results = append(results, res)
+	}
+
+	refreshContainers()
+	ctMu.Lock()
+	ctLastPick = time.Time{} // 强制下次立即刷新
+	ctMu.Unlock()
+	refreshContainers()
+	runProbe()
+	writeJSON(w, map[string]any{"ok": firstErr == "", "error": firstErr, "results": results})
 }
 
 // ---------------------------------------------------------------- 分组 API
@@ -651,6 +771,7 @@ func main() {
 	mux.HandleFunc("GET /api/containers", handleContainerList)
 	// 以下均为管理操作：仅本机（管理员模式）可访问
 	mux.HandleFunc("POST /api/containers/{name}/{action}", requireAdmin(handleContainerAction))
+	mux.HandleFunc("POST /api/items/{id}/containers/{action}", requireAdmin(handleItemContainerAction))
 	mux.HandleFunc("/api/groups", requireAdmin(handleGroups))
 	mux.HandleFunc("/api/groups/sort", requireAdmin(handleGroupSort))
 	mux.HandleFunc("/api/groups/{id}", requireAdmin(handleGroupByID))

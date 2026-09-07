@@ -38,9 +38,13 @@ const NET_MODES = [
   { key: 'lan', label: '局域网' },
   { key: 'local', label: '本机' },
 ];
-const netMode = localStorage.getItem('hp:netMode') || 'auto';
+let netMode = localStorage.getItem('hp:netMode') || 'auto';
 
 function netLabel(key) { return (NET_MODES.find((m) => m.key === key) || NET_MODES[0]).label; }
+
+function netModeTitle(key) {
+  return `访问地址：${key === 'auto' ? '自动选择' : key === 'lan' ? '局域网地址（常用）' : '本机地址（localhost）'}，点击切换`;
+}
 
 // 取该卡片应打开的地址：无内网地址时固定用 url
 function chooseAddress(item) {
@@ -52,15 +56,29 @@ function chooseAddress(item) {
   return isLocal ? item.lan_url : item.url;
 }
 
+// 切换模式后同步卡片悬停提示里的地址（点击打开在 click 时实时取 chooseAddress，无需刷新）
+function refreshCardTitles() {
+  document.querySelectorAll('.card').forEach((card) => {
+    const it = itemById[Number(card.dataset.id)];
+    if (!it) return;
+    card.title = it.hidden ? '已禁用' : (chooseAddress(it) || '');
+  });
+}
+
 function bindNetChip() {
   const chip = el('netMode');
-  chip.textContent = netLabel(netMode);
-  chip.title = `访问地址：${netMode === 'auto' ? '自动选择' : netMode === 'lan' ? '局域网地址（常用）' : '本机地址（localhost）'}，点击切换`;
+  el('netModeText').textContent = netLabel(netMode);
+  chip.title = netModeTitle(netMode);
   chip.addEventListener('click', () => {
     const idx = NET_MODES.findIndex((m) => m.key === netMode);
-    const next = NET_MODES[(idx + 1) % NET_MODES.length].key;
-    localStorage.setItem('hp:netMode', next);
-    location.reload();
+    const next = NET_MODES[(idx + 1) % NET_MODES.length];
+    netMode = next.key;
+    localStorage.setItem('hp:netMode', next.key);
+    // 只更新界面与卡片地址提示，不做整页刷新，避免闪屏
+    el('netModeText').textContent = next.label;
+    chip.title = netModeTitle(next.key);
+    refreshCardTitles();
+    toast(`访问地址已切换为「${next.label}」`);
   });
 }
 
@@ -83,7 +101,9 @@ function renderBoard() {
   const board = el('board');
   const visible = (state.groups || []).filter((g) => g.items && g.items.length);
   if (!visible.length) {
-    board.innerHTML = `<div class="empty">还没有任何卡片，去 <a href="/admin">管理后台</a> 添加吧</div>`;
+    board.innerHTML = state.features.admin
+      ? `<div class="empty">还没有任何卡片，去 <a href="/admin">管理后台</a> 添加吧</div>`
+      : `<div class="empty">暂无可用的服务卡片</div>`;
     return;
   }
   board.innerHTML = visible.map((g) => `
@@ -215,23 +235,55 @@ function iconHTML(item) {
 
 const ctx = el('ctxMenu');
 
+// 拆分卡片绑定的容器列表（与后端一致：英文/中文逗号或空格分隔）
+function splitList(raw) {
+  return String(raw || '').split(/[,，\s]+/).map((s) => s.trim()).filter(Boolean);
+}
+
+// 菜单项 SVG 图标（stroke 风格，与后台操作栏一致）
+const MENU_ICON = {
+  start: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 5.5 11 6.5-11 6.5Z"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+  restart: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>',
+  memo: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>',
+  open: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>',
+};
+
+function ctxBtn(act, label, danger) {
+  return `<button data-act="${act}"${danger ? ' class="danger"' : ''}><span class="ci">${MENU_ICON[act] || ''}</span><span class="ct">${label}</span></button>`;
+}
+
+// 服务（多容器）整体运行状态摘要
+function containerSummary(containers, names) {
+  if (!names.length) return '';
+  const present = names.map((n) => containers[n]).filter(Boolean);
+  const running = present.filter((c) => c.state === 'running').length;
+  const missing = names.length - present.length;
+  let st;
+  if (running === names.length) st = '运行中';
+  else if (running > 0) st = `${running}/${names.length} 运行`;
+  else st = missing > 0 ? '已停止（含未找到容器）' : '已停止';
+  return `${names.length} 个容器 · ${st}`;
+}
+
 function showCtxMenu(x, y, card) {
   const it = itemById[Number(card.dataset.id)];
   if (!it) return;
   ctxOpenedAt = Date.now();
-  const cname = it.container_name || '';
-  const c = cname ? (state.status.containers || {})[cname] : null;
-  const running = !!(c && c.state === 'running');
-  const withDocker = !!(cname && state.features.docker);
+  const cnames = splitList(it.container_name);
+  const ctMap = state.status.containers || {};
+  const present = cnames.map((n) => ctMap[n]).filter(Boolean);
+  const runningN = present.filter((c) => c.state === 'running').length;
+  const withDocker = !!(cnames.length && state.features.docker);
   let title = escapeHTML(it.name);
-  if (withDocker) title += ` · ${c ? (running ? '运行中' : c.state === 'missing' ? '容器缺失' : '已停止') : '—'}`;
+  if (withDocker) title += ` · ${containerSummary(ctMap, cnames)}`;
 
   const actions = [];
-  if (withDocker && !running) actions.push('<button data-act="start">启动容器</button>');
-  if (withDocker && running) actions.push('<button data-act="stop" class="danger">停止容器</button>');
-  if (withDocker && running) actions.push('<button data-act="restart">重启容器</button>');
-  if (it.memo) actions.push('<button data-act="memo">查看备注</button>');
-  actions.push('<button data-act="open">打开链接</button>');
+  if (withDocker && runningN < cnames.length) actions.push(ctxBtn('start', '启动容器'));
+  if (withDocker && runningN > 0) actions.push(ctxBtn('stop', '停止容器', true));
+  if (withDocker && runningN > 0) actions.push(ctxBtn('restart', '重启容器'));
+  if (it.memo) actions.push(ctxBtn('memo', '查看备注'));
+  actions.push(ctxBtn('open', '打开链接'));
 
   ctx.innerHTML = `<div class="ctx-title">${title}</div>${actions.join('')}`;
   ctx.style.display = 'block';
@@ -248,7 +300,7 @@ function showCtxMenu(x, y, card) {
       if (url) window.open(url, '_blank');
       return;
     }
-    containerAction(cname, act);
+    containerAction(it, act);
   }));
   // 视口边界自适应
   const r = ctx.getBoundingClientRect();
@@ -297,9 +349,15 @@ function applyStatus() {
     const res = items[id];
     const dot = card.querySelector('[data-dot]');
     const dead = it && !it.hidden && (res && res.checked && !res.online);
-    const cname = it ? it.container_name : '';
-    const c = cname ? containers[cname] : null;
-    const cDown = !!(c && c.state !== 'running');
+
+    // 绑定多容器：任一容器非 running 即视为服务不可用（容器缺失也算不可用）
+    let cDown = false;
+    if (it && it.container_name) {
+      for (const n of splitList(it.container_name)) {
+        const c = containers[n];
+        if (c && c.state !== 'running') { cDown = true; break; }
+      }
+    }
 
     // 状态点：轮询关闭/禁用/未开启探测 → 常亮灰点不闪烁；探测进行中 → 淡入淡出；在线/离线 → 对应颜色
     const probing = String(state.settings.probe_interval ?? 20) !== '0';
@@ -331,15 +389,39 @@ async function refreshStatus() {
   }
 }
 
+/* ------------------------------------------------------------ 手动探测 */
+
+// 触发一轮探测并刷新状态（右上角刷新按钮 / 打开页面按设置自动触发）
+async function probeNow() {
+  const svg = el('refreshBtn').querySelector('svg');
+  svg.classList.add('spin');
+  try {
+    await api('/api/probe', { method: 'POST' });
+    await refreshStatus();
+  } catch (e) {
+    toast(`探测失败: ${e.message}`);
+  } finally {
+    svg.classList.remove('spin');
+  }
+}
+
 /* ------------------------------------------------------------ 容器操作 */
 
-async function containerAction(name, action) {
+// 对卡片绑定的全部容器执行启停/重启（走服务级批量接口，stop 先停应用、start 先拉依赖）
+async function containerAction(item, action) {
+  const names = splitList(item.container_name);
   const label = { start: '启动', stop: '停止', restart: '重启' }[action] || action;
-  if (action !== 'start' && !confirm(`确认${label}容器「${name}」？`)) return;
-  toast(`正在${label} ${name}…`);
+  const target = names.length > 1 ? `${item.name}（${names.length} 个容器）` : names[0];
+  if (action !== 'start' && !confirm(`确认${label}「${target}」？`)) return;
+  toast(`正在${label} ${names.length > 1 ? item.name : names[0]}…`);
   try {
-    await api(`/api/containers/${encodeURIComponent(name)}/${action}`, { method: 'POST' });
-    toast(`已${label} ${name}`);
+    const data = await api(`/api/items/${item.id}/containers/${action}`, { method: 'POST' });
+    const failed = (data.results || []).filter((r) => !r.ok);
+    if (failed.length) {
+      toast(`${label}部分失败：${failed[0].name} ${failed[0].error || ''}`);
+    } else {
+      toast(`已${label} ${names.length > 1 ? `${names.length} 个容器` : names[0]}`);
+    }
     setTimeout(refreshStatus, 900);
   } catch (e) {
     toast(`${label}失败: ${e.message}`);
@@ -364,11 +446,14 @@ async function boot() {
   tickClock();
   setInterval(tickClock, 1000);
   bindNetChip();
+  el('refreshBtn').addEventListener('click', () => probeNow());
   try {
     const data = await api('/api/board');
     state.settings = data.settings || {};
     state.groups = data.groups || [];
     state.features = data.features || state.features;
+    // 管理员入口：仅管理员（本机访问）显示，游客不渲染入口
+    el('adminLink').style.display = state.features.admin ? '' : 'none';
     const byId = {};
     (state.groups || []).forEach((g) => (g.items || []).forEach((it) => { byId[it.id] = it; }));
     itemById = byId;
@@ -377,7 +462,12 @@ async function boot() {
     el('board').innerHTML = `<div class="empty">加载失败：${escapeHTML(e.message)}</div>`;
     return;
   }
-  await refreshStatus();
+  // 打开页面时是否立即触发一轮探测（设置 probe_on_open=1 默认开启；后台轮询 probe_interval=0 时尤其有用）
+  if (String(state.settings.probe_on_open ?? '1') === '1') {
+    await probeNow();
+  } else {
+    await refreshStatus();
+  }
   setInterval(refreshStatus, 10000);
 }
 

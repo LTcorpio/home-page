@@ -146,7 +146,7 @@ function renderItems() {
         ${it.lan_url ? `<div class="l" title="${escapeHTML(it.lan_url)}">↳ ${escapeHTML(it.lan_url)}</div>` : ''}
       </td>
       <td class="no-wrap">${escapeHTML(groupName(it.group_id))}</td>
-      <td class="no-wrap">${it.container_name ? `<span class="mono">${escapeHTML(it.container_name)}</span>` : '<span class="sub">—</span>'}</td>
+      <td class="no-wrap" style="max-width:150px">${it.container_name ? `<span class="mono" title="${escapeHTML(it.container_name)}">${escapeHTML(it.container_name)}</span>` : '<span class="sub">—</span>'}</td>
       <td class="no-wrap" style="text-align:right">
         <button class="btn icon" data-move="${it.id}:up" title="上移" ${pos === 0 ? 'disabled' : ''}>${I.up}</button>
         <button class="btn icon" data-move="${it.id}:down" title="下移" ${pos === grp.length - 1 ? 'disabled' : ''}>${I.down}</button>
@@ -315,6 +315,7 @@ function renderSettings() {
   el('setDocker').value = s.docker_enabled === '0' ? '0' : '1';
   el('setShowDisabled').value = s.show_disabled === '1' ? '1' : '0';
   el('setInterval').value = s.probe_interval || 20;
+  el('setProbeOnOpen').value = s.probe_on_open === '0' ? '0' : '1';
   const b = el('dockerBadge');
   b.textContent = state.features.docker ? 'Docker 已就绪' : 'Docker 未启用';
   b.className = 'badge ' + (state.features.docker ? 'on' : 'off');
@@ -330,6 +331,7 @@ async function saveSettings() {
     docker_enabled: el('setDocker').value,
     show_disabled: el('setShowDisabled').value,
     probe_interval: el('setInterval').value,
+    probe_on_open: el('setProbeOnOpen').value,
   });
   await reload();
   toast('设置已保存');
