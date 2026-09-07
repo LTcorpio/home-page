@@ -6,6 +6,7 @@ const state = {
   features: { docker: false, admin: false },
   status: { items: {}, containers: {} },
   probingRequest: false, // 手动/自动探测请求在飞（用于等待态的呼吸点）
+  probed: false,         // 本页面是否已触发过探测：未触发前不展示历史缓存，一律灰点
 };
 
 const el = (id) => document.getElementById(id);
@@ -349,7 +350,6 @@ function applyStatus() {
     const it = byId[id];
     const res = items[id];
     const dot = card.querySelector('[data-dot]');
-    const dead = it && !it.hidden && (res && res.checked && !res.online);
 
     // 绑定多容器：任一容器非 running 即视为服务不可用（容器缺失也算不可用）
     let cDown = false;
@@ -360,24 +360,25 @@ function applyStatus() {
       }
     }
 
-    // 状态点：只要本轮探测完毕（缓存里有 checked 结果）就展示 在线绿 / 离线红，
-    // 不依赖后台轮询开关（手动刷新/打开页面自动探测的结果同样红绿展示）。
-    // 尚无结果时：后台轮询开启或有探测请求在飞 → 呼吸等待；其余常亮灰点。
+    // 探测结果展示开关：后台轮询开启，或本页面已触发过探测（打开自动探测/手动刷新），
+    // 才把结果画成红绿点。轮询关闭且本页尚未探测时，不渲染服务端历史缓存，一律灰点。
     const background = String(state.settings.probe_interval ?? 20) !== '0';
-    const pendingWait = !!state.probingRequest || background;
+    const showProbe = background || !!state.probed;
+    const waiting = background || !!state.probingRequest; // 呼吸等待：探测在跑（自动或后台）即将出结果
     dot.className = 'dot';
     if (it && it.hidden) {
       dot.classList.add('idle');
-    } else if (res && res.checked) {
+    } else if (showProbe && res && res.checked) {
       dot.classList.add(res.online ? 'online' : 'offline');
-    } else if (it && it.probe && pendingWait) {
+    } else if (it && it.probe && waiting) {
       dot.classList.add('pending');
     } else {
       dot.classList.add('idle');
     }
 
-    // 不可点击态：探测完毕且离线，或绑定容器未运行（两者都始终判断，与轮询开关无关）
-    card.classList.toggle('dead', dead || cDown);
+    // 不可点击态：展示探测结果且离线 → 禁点；绑定容器未运行 → 始终禁点
+    const probeDown = showProbe && res && res.checked && !res.online;
+    card.classList.toggle('dead', (it && !it.hidden && probeDown) || cDown);
     if (it && it.hidden) card.classList.add('disabled');
   });
 }
@@ -401,6 +402,7 @@ async function probeNow() {
   svg.classList.add('spin');
   try {
     await api('/api/probe', { method: 'POST' });
+    state.probed = true; // 探测成功，此后按结果红绿展示
     await refreshStatus(); // 结果落缓存后按 红/绿 刷新各卡片状态点
   } catch (e) {
     toast(`探测失败: ${e.message}`);
