@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>管理 · Home</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+</head>
+<body>
+  <div class="wallpaper" id="wallpaper"></div>
+  <div class="mask" id="pageMask"></div>
+
+  <div class="scroll-wrap">
+  <div class="admin-wrap">
+    <div class="admin-top">
+      <h1>管理后台</h1>
+      <span class="chip" id="countChip">—</span>
+      <div class="spacer"></div>
+      <a class="btn" href="/">返回首页</a>
+    </div>
+
+    <div class="admin-main">
+      <!-- 侧边导航 -->
+      <nav class="sidebar">
+        <button class="active" data-tab="groups">
+          <span class="ico"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg></span>
+          分组
+        </button>
+        <button data-tab="items">
+          <span class="ico"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18"/></svg></span>
+          卡片
+        </button>
+        <button data-tab="settings">
+          <span class="ico"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></span>
+          站点设置
+        </button>
+      </nav>
+
+      <div class="content">
+        <!-- 分组 -->
+        <section class="panel active" id="panel-groups">
+          <div class="card-panel">
+            <h3>新建分组</h3>
+            <div class="row-field field">
+              <label>分组名称</label>
+              <input type="text" id="newGroupName" placeholder="例如：影音娱乐" />
+              <button class="btn primary" id="addGroup">添加</button>
+            </div>
+          </div>
+          <div class="card-panel" id="groupList"><div class="empty">加载中…</div></div>
+        </section>
+
+        <!-- 卡片 -->
+        <section class="panel" id="panel-items">
+          <div class="card-panel">
+            <div class="toolbar">
+              <select id="filterGroup" style="width:auto;min-width:150px"></select>
+              <div class="grow"></div>
+              <span class="badge" id="dockerBadge">Docker 未启用</span>
+              <button class="btn primary" id="addItem">＋ 新增卡片</button>
+            </div>
+          </div>
+          <div class="card-panel">
+            <table class="table">
+              <colgroup>
+                <col style="width:44px" />
+                <col style="width:150px" />
+                <col />
+                <col style="width:108px" />
+                <col style="width:128px" />
+                <col style="width:172px" />
+              </colgroup>
+              <thead>
+                <tr><th></th><th>名称</th><th>地址</th><th>分组</th><th>容器</th><th style="text-align:right">操作</th></tr>
+              </thead>
+              <tbody id="itemList"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- 设置 -->
+        <section class="panel" id="panel-settings">
+          <div class="card-panel">
+            <h3>外观</h3>
+            <div class="row-field field"><label>站点标题</label><input type="text" id="setTitle" placeholder="浏览器标签页标题" /></div>
+            <div class="row-field field">
+              <label>壁纸</label>
+              <input type="text" id="setBg" placeholder="/icons/xxx.jpg，留空用深色渐变" />
+              <input type="file" id="setBgFile" accept=".jpg,.jpeg,.png,.webp" style="display:none" />
+              <button class="btn" id="bgUpload">上传</button>
+            </div>
+            <div class="form-grid">
+              <div class="field"><label>遮罩透明度（0~1）</label><input type="number" id="setMask" min="0" max="1" step="0.1" /></div>
+              <div class="field"><label>壁纸模糊（px）</label><input type="number" id="setBlur" min="0" max="20" /></div>
+              <div class="field"><label>内容最大宽度（px）</label><input type="number" id="setMaxWidth" min="600" max="2560" /></div>
+            </div>
+          </div>
+          <div class="card-panel">
+            <h3>检测与控制</h3>
+            <div class="form-grid">
+              <div class="field">
+                <label>可达性轮询间隔（秒）</label>
+                <input type="number" id="setInterval" min="0" max="600" />
+                <div class="sub">0 = 关闭轮询；最小值 5 秒。改动即时生效，无需重启。</div>
+              </div>
+              <div class="field">
+                <label>Docker 启停控制</label>
+                <select id="setDocker"><option value="1">启用</option><option value="0">停用</option></select>
+                <div class="sub">卡片绑定容器后，右键卡片即可启停。</div>
+              </div>
+              <div class="field">
+                <label>禁用卡片显示</label>
+                <select id="setShowDisabled"><option value="1">首页置灰显示</option><option value="0">不显示</option></select>
+                <div class="sub">设为「首页置灰显示」时，被禁用的卡片仍可见但不可打开。</div>
+              </div>
+            </div>
+          </div>
+          <div style="text-align:right"><button class="btn primary" id="saveSettings">保存设置</button></div>
+        </section>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <!-- 卡片编辑弹窗 -->
+  <div class="modal-mask" id="mask">
+    <div class="modal">
+      <h3 id="modalTitle">编辑卡片</h3>
+      <input type="hidden" id="fId" />
+      <div class="form-grid">
+        <div class="field full"><label>名称 *</label><input type="text" id="fName" /></div>
+        <div class="field"><label>地址（局域网常用）</label><input type="url" id="fUrl" placeholder="http://192.0.2.10:8080" /></div>
+        <div class="field"><label>本机地址（localhost）</label><input type="url" id="fLanUrl" placeholder="http://localhost:5197（可选）" /></div>
+        <div class="field full"><label>描述</label><input type="text" id="fDesc" /></div>
+        <div class="field"><label>分组</label><select id="fGroup"></select></div>
+        <div class="field"><label>状态</label><select id="fStatus"><option value="1">启用</option><option value="0">禁用</option></select></div>
+        <div class="field"><label>图标类型</label><select id="fIconType">
+          <option value="auto">自动抓取 favicon</option>
+          <option value="upload">上传图片</option>
+          <option value="text">文字图标</option>
+        </select></div>
+        <div class="field"><label>绑定容器</label><input type="text" id="fContainer" placeholder="容器名，右键卡片可启停" /></div>
+        <div class="field" id="iconTextRow" style="display:none"><label>图标文字</label><input type="text" id="fIconText" placeholder="如：状态 / RIDE" /></div>
+        <div class="field" id="uploadRow" style="display:none">
+          <label>图标文件</label>
+          <input type="file" id="fIconFile" accept=".png,.jpg,.jpeg,.svg,.ico,.webp,.gif" />
+        </div>
+        <div class="field" id="iconRow">
+          <label>预览</label>
+          <div class="icon-preview" id="iconPreviewBox"><span id="iconPreview"></span></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn mini" id="doFetch">抓取 favicon</button>
+            <button class="btn mini" id="doUpload">上传</button>
+          </div>
+        </div>
+        <div class="field"><label>状态探测</label><select id="fProbe"><option value="1">开启</option><option value="0">关闭</option></select></div>
+        <div class="field"><label>访问组（预留）</label><input type="text" id="fAcl" placeholder="逗号分隔，留空=公开" /></div>
+        <div class="field full"><label>备忘录（仅管理后台可见，可记录凭证）</label><textarea id="fMemo" rows="3" placeholder="例如：后台账号 / 端口说明 / 续费提醒…"></textarea></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" id="modalCancel">取消</button>
+        <button class="btn primary" id="modalSave">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="/assets/admin.js"></script>
+</body>
+</html>
