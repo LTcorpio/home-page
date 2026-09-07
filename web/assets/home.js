@@ -4,13 +4,27 @@ const state = {
   settings: {},
   groups: [],
   features: { docker: false, admin: false },
-  status: { items: {}, containers: {} },
-  probingRequest: false, // 手动/自动探测请求在飞（用于等待态的呼吸点）
-  probed: false,         // 本页面是否已触发过探测：未触发前不展示历史缓存，一律灰点
+  probes: {},     // 浏览器直连可达性结果：id -> {online, error?, ts}
+  containers: {}, // 容器运行状态：name -> {state, ...}（来自 /api/containers）
+  probing: false, // 是否有探测轮次在跑（刷新按钮旋转 + 未出结果的卡片呼吸等待）
 };
 
 const el = (id) => document.getElementById(id);
 const toastBox = el('toast');
+
+/* ------------------------------------------------ 前端偏好（localStorage，仅当前浏览器生效） */
+// 自动探测偏好：旧版「轮询间隔 / 首次加载探测」原为后端全局配置，随后端探测一起移除；
+// 现探测在浏览器内进行，这两个行为改为按设备保存在本机，可随时在右上角「自动探测设置」调整。
+const PREFS = { autoSec: 20, onOpen: true }; // 默认：每 20 秒自动重探 + 打开页面立即探测
+const PREFS_KEYS = { autoSec: 'hp:autoSec', onOpen: 'hp:onOpen' };
+
+function readPrefs() {
+  const sec = parseInt(localStorage.getItem(PREFS_KEYS.autoSec), 10);
+  if (!Number.isNaN(sec)) PREFS.autoSec = Math.max(0, Math.min(86400, sec));
+  const on = localStorage.getItem(PREFS_KEYS.onOpen);
+  if (on !== null) PREFS.onOpen = on === '1';
+}
+
 
 function toast(msg) {
   toastBox.textContent = msg;
@@ -52,6 +66,11 @@ const NET_MODES = [
 ];
 let netMode = localStorage.getItem('hp:netMode') || 'auto';
 
+// 访客（非本机访问）不能探测/打开自己设备的 localhost：只给 自动/局域网 两档；本机(管理员)才显示「本机」
+function visibleModes() {
+  return state.features.admin ? NET_MODES : NET_MODES.filter((m) => m.key !== 'local');
+}
+
 function netLabel(key) { return (NET_MODES.find((m) => m.key === key) || NET_MODES[0]).label; }
 
 function netModeTitle(key) {
@@ -82,8 +101,9 @@ function bindNetChip() {
   el('netModeText').textContent = netLabel(netMode);
   chip.title = netModeTitle(netMode);
   chip.addEventListener('click', () => {
-    const idx = NET_MODES.findIndex((m) => m.key === netMode);
-    const next = NET_MODES[(idx + 1) % NET_MODES.length];
+    const modes = visibleModes();
+    const idx = modes.findIndex((m) => m.key === netMode);
+    const next = modes[(idx + 1) % modes.length];
     netMode = next.key;
     localStorage.setItem('hp:netMode', next.key);
     // 只更新界面与卡片地址提示，不做整页刷新，避免闪屏
@@ -91,6 +111,8 @@ function bindNetChip() {
     chip.title = netModeTitle(next.key);
     refreshCardTitles();
     toast(`访问地址已切换为「${next.label}」`);
+    // 状态点跟随新模式：立即撤旧态并按新模式的地址重新探测、逐项点亮
+    probeAll(true);
   });
 }
 
@@ -157,7 +179,7 @@ function bindCards() {
         return;
       }
       if (it.hidden) { toast(`「${it.name}」已禁用`); return; }
-      if (card.classList.contains('dead')) { toast(`「${it.name}」当前不可达`); return; }
+      if (card.classList.contains('dead')) { toast(`「${it.name}」当前不可达${reachReason(it.id)}`); return; }
       const url = chooseAddress(it);
       if (url) window.open(url, '_blank');
     });
@@ -283,7 +305,7 @@ function showCtxMenu(x, y, card) {
   if (!it) return;
   ctxOpenedAt = Date.now();
   const cnames = splitList(it.container_name);
-  const ctMap = state.status.containers || {};
+  const ctMap = state.containers || {};
   const present = cnames.map((n) => ctMap[n]).filter(Boolean);
   const runningN = present.filter((c) => c.state === 'running').length;
   const withDocker = !!(cnames.length && state.features.docker);
@@ -305,7 +327,7 @@ function showCtxMenu(x, y, card) {
     if (act === 'memo') { openMemoPop(it); return; }
     if (act === 'open') {
       if (card.classList.contains('dead')) {
-        toast(`「${it.name}」当前不可达`);
+        toast(`「${it.name}」当前不可达${reachReason(it.id)}`);
         return;
       }
       const url = chooseAddress(it);
@@ -349,107 +371,141 @@ window.addEventListener('scroll', () => {
   if (Date.now() - ctxOpenedAt > 250) hideCtxMenu();
 }, true);
 
-/* ------------------------------------------------------------ 状态 */
+/* ------------------------------------------------------------ 可达性（浏览器直连） */
 
+// 取卡片离线原因（来自最近一次探测的 error），用于不可达提示与状态点悬停
+function reachReason(id) {
+  const res = state.probes[id];
+  return res && res.error ? `：${res.error}` : '';
+}
+
+// 单张卡片：按当前模式取地址，浏览器直接发请求判定可达性。
+// 判定原则：http/https 用 fetch(no-cors)——网络可达即在线（拿不到状态码也不关心 3xx/4xx/5xx），
+// 网络层不通（断网/拒连/域名解析失败/证书不受信任/超时）即离线。
+// 注意：浏览器与服务器容器不同，直接处在真实主机网络栈里，Wi-Fi 断了就必然判红。
+const PROBE_TIMEOUT = 4000; // 单次判定超时
+
+async function probeCard(it) {
+  const addr = chooseAddress(it);
+  if (!addr) return null;
+  if (!/^https?:\/\//i.test(addr)) return null; // 非 Web 地址无法在浏览器判定，跳过（状态点不渲染）
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT);
+  try {
+    await fetch(addr, {
+      method: 'GET',
+      mode: 'no-cors', // 跨域也能判定「能否拿到响应」，不被 CORS 头拦截
+      redirect: 'follow',
+      cache: 'no-store',
+      signal: ctrl.signal,
+    });
+    return { online: true, ts: Date.now() };
+  } catch (e) {
+    const err = (e && e.name === 'AbortError')
+      ? '请求超时'
+      : '无法访问（网络不通 / 连接被拒 / 证书不受信任等）';
+    return { online: false, error: err, ts: Date.now() };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 探测一轮：清空旧结果 → 逐项浏览器直连 → 先完成的先点亮。
+// 支持“打断重来”：切模式/刷新会启动新代次，旧代次未完成的写入一律丢弃（结果不会串模式）。
+let probeGen = 0; // 探测代次，启动新轮 +1；旧轮完成时若代次已过期则不再落地
+
+async function probeAll(manual = false) {
+  const gen = ++probeGen;
+  state.probing = true;
+  state.probes = {}; // 撤掉上一轮/上一模式的旧结果，全部回到灰点，杜绝旧红绿残留
+  const svg = el('refreshBtn').querySelector('svg');
+  if (manual) svg.classList.add('spin');
+  applyStatus();
+  const targets = [];
+  (state.groups || []).forEach((g) => (g.items || []).forEach((it) => {
+    if (it.hidden || !it.probe) return;
+    const addr = chooseAddress(it);
+    if (addr && /^https?:\/\//i.test(addr)) targets.push(it); // 仅收集可浏览器判定的 http/https 卡片
+  }));
+  await Promise.allSettled(targets.map(async (it) => {
+    const r = await probeCard(it);
+    if (!r || gen !== probeGen) return; // 已被更新的轮次取代：丢弃本次结果
+    state.probes[it.id] = r;
+    applyStatus(); // 单项完成即点亮
+  }));
+  if (gen !== probeGen) return; // 期间启动了新轮次：由新轮负责收尾
+  state.probing = false;
+  if (manual) svg.classList.remove('spin');
+  applyStatus();
+}
+
+// 自动重探调度：按 PREFS.autoSec 起可重启的定时器；间隔为 0 即停用（仅手动/切模式时探测）
+let autoTimer = null;
+function armAutoProbe() {
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  if (PREFS.autoSec <= 0) return;
+  autoTimer = setInterval(() => { if (!document.hidden) probeAll(); }, PREFS.autoSec * 1000);
+}
+
+// 拉取容器运行状态（卡片 dead 判定 / 右键菜单摘要用），10 秒一次，与可达性探测无关
+async function refreshContainers() {
+  if (!state.features.docker) return;
+  try {
+    const data = await api('/api/containers', { timeout: 8000 });
+    state.containers = (data && data.containers) || {};
+    applyStatus();
+  } catch (e) {
+    // 获取失败保留上次状态，不打断页面
+  }
+}
+
+// 渲染整页状态点与卡片可点性：数据源 = state.probes（浏览器直连结果）+ state.containers
 function applyStatus() {
-  const items = state.status.items || {};
-  const containers = state.status.containers || {};
   const byId = itemById;
   document.querySelectorAll('.card').forEach((card) => {
     const id = Number(card.dataset.id);
     const it = byId[id];
-    const res = items[id];
+    if (!it) return;
+    const res = state.probes[id];
     const dot = card.querySelector('[data-dot]');
+    const addr = chooseAddress(it);
+    const isWeb = !!(addr && /^https?:\/\//i.test(addr));
 
     // 绑定多容器：任一容器非 running 即视为服务不可用（容器缺失也算不可用）
     let cDown = false;
-    if (it && it.container_name) {
+    if (it.container_name) {
       for (const n of splitList(it.container_name)) {
-        const c = containers[n];
+        const c = state.containers[n];
         if (c && c.state !== 'running') { cDown = true; break; }
       }
     }
 
-    // 探测结果展示开关：后台轮询开启，或本页面已触发过探测（打开自动探测/手动刷新），
-    // 才把结果画成红绿点。轮询关闭且本页尚未探测时，不渲染服务端历史缓存，一律灰点。
-    const background = String(state.settings.probe_interval ?? 20) !== '0';
-    const showProbe = background || !!state.probed;
-    const waiting = background || !!state.probingRequest; // 呼吸等待：探测在跑（自动或后台）即将出结果
     dot.className = 'dot';
-    if (it && it.hidden) {
+    dot.title = '';
+    if (it.hidden) {
       dot.classList.add('idle');
-    } else if (showProbe && res && res.checked) {
-      dot.classList.add(res.online ? 'online' : 'offline');
-    } else if (it && it.probe && waiting) {
-      dot.classList.add('pending');
+    } else if (res) {
+      if (res.online) {
+        dot.classList.add('online');
+        dot.title = '在线';
+      } else {
+        dot.classList.add('offline');
+        // 悬停状态点可看到离线原因（如断网/证书不受信任等）
+        dot.title = res.error ? `离线：${res.error}` : '离线';
+      }
+    } else if (it.probe && state.probing && isWeb) {
+      dot.classList.add('pending'); // 呼吸等待：正在浏览器探测
+    } else if (it.probe && !isWeb && addr) {
+      dot.classList.add('idle');
+      dot.title = '非网页地址，浏览器无法判定可达性';
     } else {
       dot.classList.add('idle');
     }
 
-    // 不可点击态：展示探测结果且离线 → 禁点；绑定容器未运行 → 始终禁点
-    const probeDown = showProbe && res && res.checked && !res.online;
+    // 不可点击态：浏览器判定离线 → 禁点；绑定容器未运行 → 始终禁点
+    const probeDown = res && !res.online;
     card.classList.toggle('dead', (it && !it.hidden && probeDown) || cDown);
-    if (it && it.hidden) card.classList.add('disabled');
-  });
-}
-
-async function refreshStatus() {
-  try {
-    state.status = await api('/api/status');
-    applyStatus();
-    return true;
-  } catch (e) {
-    console.warn('状态刷新失败', e);
-    return false;
-  }
-}
-
-/* ------------------------------------------------------------ 手动探测 */
-
-// 触发一轮探测并逐项即时展示状态（右上角刷新按钮 / 打开页面按设置自动触发）
-async function probeNow() {
-  const svg = el('refreshBtn').querySelector('svg');
-  state.probingRequest = true; // 探测进行中：尚无结果的卡片显示呼吸等待点
-  state.probed = true;         // 本轮已发起探测：此后可展示本轮红绿结果
-  // 立即撤掉上一轮展示的旧结果（服务端缓存也已在接管时清空），全部回到灰/呼吸等待。
-  // 关键：杜绝「断网/刷新瞬间仍残留上一轮旧红绿（如旧全绿）」被误认为当前状态。
-  state.status = { ...state.status, items: {} };
-  svg.classList.add('spin');
-  applyStatus();
-  try {
-    await api('/api/probe', { method: 'POST' }); // 异步触发，后端随即开始逐项探测，这里很快返回
-    // 高频轮询 /api/status：后端每完成一项写一条缓存，这里逐项渲染——
-    // 哪个服务先探测完就先亮起（绿/红），不需要等其它服务全部探测完再一起显示。
-    await pollProbeResults();
-  } catch (e) {
-    toast(`探测失败: ${e.message}`);
-  } finally {
-    state.probingRequest = false;
-    svg.classList.remove('spin');
-    // 失败/收尾后重画一次：轮询关闭时把等待态收成常亮灰点（不渲染任何过期结果）；
-    // 成功时本轮结果已在轮询中画好，此步幂等无副作用。
-    if (String(state.settings.probe_interval ?? 20) === '0') applyStatus();
-  }
-}
-
-// 探测进行中轮询：拉 /api/status 逐项展示，直到服务端 probing=false（本轮全部完成）。
-// 单次拉取失败或超时最多等待到 timeoutMs 兜底退出（已收到的部分结果照常展示）。
-function pollProbeResults(timeoutMs = 30000) {
-  return new Promise((resolve) => {
-    const t0 = Date.now();
-    const tick = async () => {
-      try {
-        const st = await api('/api/status', { timeout: 8000 });
-        state.status = st;
-        applyStatus();
-        if (!st.probing) { resolve(true); return; } // 本轮探测全部完成
-      } catch (e) {
-        console.warn('轮询探测结果失败', e);
-      }
-      if (Date.now() - t0 >= timeoutMs) { resolve(false); return; }
-      setTimeout(tick, 350); // 短间隔轮询：先完成的服务能尽快点亮
-    };
-    tick();
+    if (it.hidden) card.classList.add('disabled');
   });
 }
 
@@ -470,7 +526,7 @@ async function containerAction(item, action) {
     } else {
       toast(`已${label} ${names.length > 1 ? `${names.length} 个容器` : names[0]}`);
     }
-    setTimeout(probeNow, 900); // 操作后自动探测一轮并逐项展示最新状态
+    setTimeout(probeAll, 900); // 操作后立即按当前模式重探一轮并逐项展示最新状态
   } catch (e) {
     toast(`${label}失败: ${e.message}`);
   }
@@ -490,11 +546,51 @@ function tickClock() {
 
 /* ------------------------------------------------------------ 启动 */
 
+const setPop = el('setPop');
+
+// 回填弹层输入为指定值（打开时用当前偏好，恢复默认时用默认值）
+function fillSetPop(sec, on) {
+  el('setSec').value = sec;
+  el('setOpen').checked = on;
+}
+
+function applyPrefs(sec, on, msg) {
+  localStorage.setItem(PREFS_KEYS.autoSec, String(sec));
+  localStorage.setItem(PREFS_KEYS.onOpen, on ? '1' : '0');
+  PREFS.autoSec = sec;
+  PREFS.onOpen = on;
+  armAutoProbe(); // 间隔变化立即生效，无需重开页面
+  toast(msg);
+}
+
+function bindSetPop() {
+  const btn = el('setBtn');
+  const toggle = () => {
+    const show = setPop.style.display === 'none';
+    if (show) fillSetPop(PREFS.autoSec, PREFS.onOpen);
+    setPop.style.display = show ? 'block' : 'none';
+  };
+  btn.addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
+  el('setSave').addEventListener('click', () => {
+    const sec = Math.max(0, Math.min(86400, Math.round(Number(el('setSec').value) || 0)));
+    const on = el('setOpen').checked;
+    setPop.style.display = 'none';
+    applyPrefs(sec, on, sec > 0 ? `自动重探：每 ${sec} 秒一轮` : '已关闭自动重探（仅手动刷新 / 切换模式时探测）');
+  });
+  el('setReset').addEventListener('click', () => {
+    setPop.style.display = 'none';
+    applyPrefs(20, true, '已恢复默认：每 20 秒自动重探，打开页面立即探测');
+  });
+  document.addEventListener('click', (e) => {
+    if (!setPop.contains(e.target)) setPop.style.display = 'none';
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setPop.style.display = 'none'; });
+}
+
 async function boot() {
+  readPrefs(); // 先读回本机偏好（自动重探间隔 / 打开页面立即探测）
   tickClock();
   setInterval(tickClock, 1000);
-  bindNetChip();
-  el('refreshBtn').addEventListener('click', () => probeNow());
   try {
     const data = await api('/api/board');
     state.settings = data.settings || {};
@@ -510,13 +606,21 @@ async function boot() {
     el('board').innerHTML = `<div class="empty">加载失败：${escapeHTML(e.message)}</div>`;
     return;
   }
-  // 打开页面时是否立即触发一轮探测（设置 probe_on_open=1 默认开启；后台轮询 probe_interval=0 时尤其有用）
-  if (String(state.settings.probe_on_open ?? '1') === '1') {
-    await probeNow();
-  } else {
-    await refreshStatus();
+  // 访客（非本机访问）不可探测/打开 localhost：残留的「本机」模式强制回落局域网
+  if (!state.features.admin && netMode === 'local') {
+    netMode = 'lan';
+    localStorage.setItem('hp:netMode', 'lan');
   }
-  setInterval(refreshStatus, 10000);
+  bindNetChip();
+  bindSetPop();
+  el('refreshBtn').addEventListener('click', () => probeAll(true));
+  // 容器状态：首次拉取后每 10 秒刷新（仅做 dead 判定与右键菜单摘要）
+  refreshContainers();
+  setInterval(refreshContainers, 10000);
+  // 可达性（间隔与开关可在右上角「自动探测设置」调整，存本机）：
+  // 打开页面默认立即探测一轮；之后页面可见时按 PREFS.autoSec 自动重探（0 = 关闭，仅手动/切模式探测）
+  if (PREFS.onOpen) probeAll(true);
+  armAutoProbe();
 }
 
 boot();
