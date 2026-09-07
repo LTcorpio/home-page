@@ -51,6 +51,9 @@ body {
 
 a { color: inherit; text-decoration: none; }
 
+/* 仅首页：禁止选中文本，避免移动端长按/滑动时出现系统选择与高亮（管理后台保持可选中） */
+body.no-select, body.no-select * { user-select: none; -webkit-user-select: none; }
+
 .text-shadow { text-shadow: var(--shadow-text); }
 
 /* ---------------------------------------------------------------- 壁纸 */
