@@ -14,15 +14,17 @@ const toastBox = el('toast');
 
 /* ------------------------------------------------ 前端偏好（localStorage，仅当前浏览器生效） */
 // 自动探测偏好：旧版「轮询间隔 / 首次加载探测」原为后端全局配置，随后端探测一起移除；
-// 现探测在浏览器内进行，这两个行为改为按设备保存在本机，可随时在右上角「自动探测设置」调整。
-const PREFS = { autoSec: 20, onOpen: true }; // 默认：每 20 秒自动重探 + 打开页面立即探测
-const PREFS_KEYS = { autoSec: 'hp:autoSec', onOpen: 'hp:onOpen' };
+// 现探测在浏览器内进行，自动重探节奏与时钟显示偏好改为按设备保存在本机，可随时在右上角「页面偏好」调整。
+const PREFS = { autoSec: 20, onOpen: true, clockSec: false }; // 默认：每 20 秒自动重探 + 打开立即探测 + 时钟不显示秒
+const PREFS_KEYS = { autoSec: 'hp:autoSec', onOpen: 'hp:onOpen', clockSec: 'hp:clockSec' };
 
 function readPrefs() {
   const sec = parseInt(localStorage.getItem(PREFS_KEYS.autoSec), 10);
   if (!Number.isNaN(sec)) PREFS.autoSec = Math.max(0, Math.min(86400, sec));
   const on = localStorage.getItem(PREFS_KEYS.onOpen);
   if (on !== null) PREFS.onOpen = on === '1';
+  const cs = localStorage.getItem(PREFS_KEYS.clockSec);
+  if (cs !== null) PREFS.clockSec = cs === '1';
 }
 
 
@@ -532,15 +534,17 @@ async function containerAction(item, action) {
   }
 }
 
-/* ------------------------------------------------------------ 时钟（仅日期与时间） */
+/* ------------------------------------------------------------ 时钟（日期完整 + 可配置显示秒） */
 
-const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
 
 function tickClock() {
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
-  el('clockTime').textContent = `${p(d.getHours())}:${p(d.getMinutes())}`;
-  el('clockDate').textContent = `${d.getMonth() + 1}-${d.getDate()}`;
+  const col = '<span class="col">:</span>';
+  const hm = `${p(d.getHours())}${col}${p(d.getMinutes())}`;
+  el('clockTime').innerHTML = PREFS.clockSec ? `${hm}${col}${p(d.getSeconds())}` : hm;
+  el('clockDate').textContent = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   el('clockWeek').textContent = weekdays[d.getDay()];
 }
 
@@ -549,17 +553,21 @@ function tickClock() {
 const setPop = el('setPop');
 
 // 回填弹层输入为指定值（打开时用当前偏好，恢复默认时用默认值）
-function fillSetPop(sec, on) {
+function fillSetPop(sec, on, cs) {
   el('setSec').value = sec;
   el('setOpen').checked = on;
+  el('setClockSec').checked = cs;
 }
 
-function applyPrefs(sec, on, msg) {
+function applyPrefs(sec, on, cs, msg) {
   localStorage.setItem(PREFS_KEYS.autoSec, String(sec));
   localStorage.setItem(PREFS_KEYS.onOpen, on ? '1' : '0');
+  localStorage.setItem(PREFS_KEYS.clockSec, cs ? '1' : '0');
   PREFS.autoSec = sec;
   PREFS.onOpen = on;
+  PREFS.clockSec = cs;
   armAutoProbe(); // 间隔变化立即生效，无需重开页面
+  tickClock();    // 时钟显示偏好立即生效
   toast(msg);
 }
 
@@ -567,19 +575,21 @@ function bindSetPop() {
   const btn = el('setBtn');
   const toggle = () => {
     const show = setPop.style.display === 'none';
-    if (show) fillSetPop(PREFS.autoSec, PREFS.onOpen);
+    if (show) fillSetPop(PREFS.autoSec, PREFS.onOpen, PREFS.clockSec);
     setPop.style.display = show ? 'block' : 'none';
   };
   btn.addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
   el('setSave').addEventListener('click', () => {
     const sec = Math.max(0, Math.min(86400, Math.round(Number(el('setSec').value) || 0)));
     const on = el('setOpen').checked;
+    const cs = el('setClockSec').checked;
     setPop.style.display = 'none';
-    applyPrefs(sec, on, sec > 0 ? `自动重探：每 ${sec} 秒一轮` : '已关闭自动重探（仅手动刷新 / 切换模式时探测）');
+    const parts = [sec > 0 ? `自动重探每 ${sec} 秒` : '已关闭自动重探', on ? '开页即探' : '开页不探', cs ? '时间显示秒' : '时间隐藏秒'];
+    applyPrefs(sec, on, cs, `已保存：${parts.join('，')}`);
   });
   el('setReset').addEventListener('click', () => {
     setPop.style.display = 'none';
-    applyPrefs(20, true, '已恢复默认：每 20 秒自动重探，打开页面立即探测');
+    applyPrefs(20, true, false, '已恢复默认：自动重探每 20 秒、打开页面立即探测、时间不显示秒');
   });
   document.addEventListener('click', (e) => {
     if (!setPop.contains(e.target)) setPop.style.display = 'none';
@@ -617,7 +627,7 @@ async function boot() {
   // 容器状态：首次拉取后每 10 秒刷新（仅做 dead 判定与右键菜单摘要）
   refreshContainers();
   setInterval(refreshContainers, 10000);
-  // 可达性（间隔与开关可在右上角「自动探测设置」调整，存本机）：
+  // 可达性（间隔与开关可在右上角「页面偏好」调整，存本机）：
   // 打开页面默认立即探测一轮；之后页面可见时按 PREFS.autoSec 自动重探（0 = 关闭，仅手动/切模式探测）
   if (PREFS.onOpen) probeAll(true);
   armAutoProbe();

@@ -182,6 +182,17 @@ body.no-select, body.no-select * { user-select: none; -webkit-user-select: none;
 .set-title { font-size: 13px; font-weight: 700; color: var(--text); }
 .set-desc { margin-top: 4px; font-size: 11px; line-height: 1.55; color: var(--text-faint); }
 
+.set-pop .sec {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, .08);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .6px;
+  color: var(--text-dim);
+}
+.set-pop .sec.first { border-top: none; padding-top: 0; margin-top: 12px; }
+
 .set-pop .srow { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 .set-pop .srow .lbl { flex: none; width: 104px; font-size: 12px; color: var(--text-dim); }
 .set-pop .srow .right { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; }
@@ -208,7 +219,10 @@ body.no-select, body.no-select * { user-select: none; -webkit-user-select: none;
 
 .clock { display: inline-block; line-height: 1.25; text-align: center; }
 .clock-time { font-size: clamp(40px, 7vw, 68px); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 1px; }
-.clock-date { font-size: clamp(13px, 1.6vw, 16px); color: var(--text-dim); margin-top: 2px; letter-spacing: .5px; }
+/* 冒号相对数字垂直居中（macOS 菜单栏时钟效果）：大字号下冒号字形偏下，独立成 span 上移微调 */
+.clock-time .col { position: relative; top: -0.06em; }
+.clock-date { display: inline-flex; align-items: center; font-size: clamp(13px, 1.6vw, 16px); color: var(--text-dim); margin-top: 2px; letter-spacing: .5px; }
+.clock-date #clockWeek { margin-left: 9px; color: var(--text); font-weight: 500; }
 
 /* ---------------------------------------------------------------- 分组 */
 
