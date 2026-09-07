@@ -19,13 +19,23 @@ function toast(msg) {
   toast._t = setTimeout(() => toastBox.classList.remove('show'), 2200);
 }
 
-async function api(path, options) {
-  const res = await fetch(path, options);
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || res.statusText);
+async function api(path, options = {}) {
+  // 统一超时：避免请求挂起时页面一直停留在旧状态（如断网时旧的全绿点久不更新）
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), options.timeout || 15000);
+  try {
+    const res = await fetch(path, { ...options, signal: ctrl.signal });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || res.statusText);
+    }
+    return res.json();
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw new Error('请求超时');
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json();
 }
 
 function escapeHTML(s) {
@@ -396,29 +406,51 @@ async function refreshStatus() {
 
 /* ------------------------------------------------------------ 手动探测 */
 
-// 触发一轮探测并刷新状态（右上角刷新按钮 / 打开页面按设置自动触发）
+// 触发一轮探测并逐项即时展示状态（右上角刷新按钮 / 打开页面按设置自动触发）
 async function probeNow() {
   const svg = el('refreshBtn').querySelector('svg');
-  state.probingRequest = true; // 探测期间让尚未有结果的卡片显示呼吸等待点
-  applyStatus();
+  state.probingRequest = true; // 探测进行中：尚无结果的卡片显示呼吸等待点
+  state.probed = true;         // 本轮已发起探测：此后可展示本轮红绿结果
+  // 立即撤掉上一轮展示的旧结果（服务端缓存也已在接管时清空），全部回到灰/呼吸等待。
+  // 关键：杜绝「断网/刷新瞬间仍残留上一轮旧红绿（如旧全绿）」被误认为当前状态。
+  state.status = { ...state.status, items: {} };
   svg.classList.add('spin');
+  applyStatus();
   try {
-    await api('/api/probe', { method: 'POST' });
-    const got = await refreshStatus(); // 重新拉取本轮结果
-    if (!got) throw new Error('探测结果获取失败');
-    state.probed = true; // 只有真正拿到新一轮结果才算「已探测」，此时才允许红绿展示
+    await api('/api/probe', { method: 'POST' }); // 异步触发，后端随即开始逐项探测，这里很快返回
+    // 高频轮询 /api/status：后端每完成一项写一条缓存，这里逐项渲染——
+    // 哪个服务先探测完就先亮起（绿/红），不需要等其它服务全部探测完再一起显示。
+    await pollProbeResults();
   } catch (e) {
-    // 探测链路失败（页面到后端不通 / 结果拉取失败）：无法确认当前真实状态，
-    // 撤掉之前展示的探测结果回灰点，避免把上一轮的过期红绿当成当前状态（如断网时仍全绿）
-    if (String(state.settings.probe_interval ?? 20) === '0') {
-      state.status = { ...state.status, items: {} };
-      applyStatus();
-    }
     toast(`探测失败: ${e.message}`);
   } finally {
     state.probingRequest = false;
     svg.classList.remove('spin');
+    // 失败/收尾后重画一次：轮询关闭时把等待态收成常亮灰点（不渲染任何过期结果）；
+    // 成功时本轮结果已在轮询中画好，此步幂等无副作用。
+    if (String(state.settings.probe_interval ?? 20) === '0') applyStatus();
   }
+}
+
+// 探测进行中轮询：拉 /api/status 逐项展示，直到服务端 probing=false（本轮全部完成）。
+// 单次拉取失败或超时最多等待到 timeoutMs 兜底退出（已收到的部分结果照常展示）。
+function pollProbeResults(timeoutMs = 30000) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const tick = async () => {
+      try {
+        const st = await api('/api/status', { timeout: 8000 });
+        state.status = st;
+        applyStatus();
+        if (!st.probing) { resolve(true); return; } // 本轮探测全部完成
+      } catch (e) {
+        console.warn('轮询探测结果失败', e);
+      }
+      if (Date.now() - t0 >= timeoutMs) { resolve(false); return; }
+      setTimeout(tick, 350); // 短间隔轮询：先完成的服务能尽快点亮
+    };
+    tick();
+  });
 }
 
 /* ------------------------------------------------------------ 容器操作 */
@@ -438,7 +470,7 @@ async function containerAction(item, action) {
     } else {
       toast(`已${label} ${names.length > 1 ? `${names.length} 个容器` : names[0]}`);
     }
-    setTimeout(refreshStatus, 900);
+    setTimeout(probeNow, 900); // 操作后自动探测一轮并逐项展示最新状态
   } catch (e) {
     toast(`${label}失败: ${e.message}`);
   }

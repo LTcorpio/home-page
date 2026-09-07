@@ -219,11 +219,14 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		"items":      status,
 		"containers": whitelistContainers(names),
 		"updated":    time.Now().Format("15:04:05"),
+		"probing":    probing(), // 是否有一轮探测在跑：前端据此判断「逐项结果是否已全部产出」
 	})
 }
 
 func handleProbeNow(w http.ResponseWriter, _ *http.Request) {
-	runProbe()
+	// 异步触发：接管即清空缓存并置 probing，随后后台逐项探测、逐项写入。
+	// 立即返回，前端轮询 /api/status 逐项展示（哪个先探测完就先显示）。
+	startProbeRound()
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
@@ -285,7 +288,7 @@ func handleContainerAction(w http.ResponseWriter, r *http.Request) {
 	ctLastPick = time.Time{} // 强制下次立即刷新
 	ctMu.Unlock()
 	refreshContainers()
-	runProbe()
+	startProbeRound()
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
@@ -402,7 +405,7 @@ func handleItemContainerAction(w http.ResponseWriter, r *http.Request) {
 	ctLastPick = time.Time{} // 强制下次立即刷新
 	ctMu.Unlock()
 	refreshContainers()
-	runProbe()
+	startProbeRound()
 	writeJSON(w, map[string]any{"ok": firstErr == "", "error": firstErr, "results": results})
 }
 
