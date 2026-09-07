@@ -220,11 +220,11 @@ function openModal(id) {
   el('fLanUrl').value = editing ? editing.lan_url || '' : '';
   el('fDesc').value = editing ? editing.description : '';
   el('fGroup').value = editing ? String(editing.group_id) : (state.groups[0] ? String(state.groups[0].id) : '0');
-  el('fStatus').value = editing && editing.hidden ? '0' : '1';
+  el('fStatus').checked = !(editing && editing.hidden);
   el('fIconType').value = editing ? editing.icon_type || 'auto' : 'auto';
   el('fIconText').value = editing && editing.icon_type === 'text' ? editing.icon_value : '';
   el('fContainer').value = editing ? editing.container_name : '';
-  el('fProbe').value = editing && !editing.probe ? '0' : '1';
+  el('fProbe').checked = !editing || !!editing.probe;
   el('fAcl').value = editing ? editing.acl : '';
   el('fMemo').value = editing ? editing.memo || '' : '';
   pendingIcon = null;
@@ -285,8 +285,8 @@ async function saveModal() {
     icon_type: iconTypeFinal,
     icon_value: iconValue,
     container_name: el('fContainer').value.trim(),
-    probe: el('fProbe').value === '1',
-    hidden: el('fStatus').value === '0',
+    probe: el('fProbe').checked,
+    hidden: !el('fStatus').checked,
     acl: el('fAcl').value.trim(),
     memo: el('fMemo').value.trim(),
     sort: editing ? editing.sort : 999,
@@ -312,10 +312,10 @@ function renderSettings() {
   el('setMask').value = s.background_mask ?? 0;
   el('setBlur').value = s.background_blur ?? 2;
   el('setMaxWidth').value = s.max_width || 1200;
-  el('setDocker').value = s.docker_enabled === '0' ? '0' : '1';
-  el('setShowDisabled').value = s.show_disabled === '1' ? '1' : '0';
+  el('setDocker').checked = s.docker_enabled !== '0';
+  el('setShowDisabled').checked = s.show_disabled === '1';
   el('setInterval').value = s.probe_interval || 20;
-  el('setProbeOnOpen').value = s.probe_on_open === '0' ? '0' : '1';
+  el('setProbeOnOpen').checked = s.probe_on_open !== '0';
   const b = el('dockerBadge');
   b.textContent = state.features.docker ? 'Docker 已就绪' : 'Docker 未启用';
   b.className = 'badge ' + (state.features.docker ? 'on' : 'off');
@@ -328,10 +328,10 @@ async function saveSettings() {
     background_mask: el('setMask').value,
     background_blur: el('setBlur').value,
     max_width: el('setMaxWidth').value,
-    docker_enabled: el('setDocker').value,
-    show_disabled: el('setShowDisabled').value,
+    docker_enabled: el('setDocker').checked ? '1' : '0',
+    show_disabled: el('setShowDisabled').checked ? '1' : '0',
     probe_interval: el('setInterval').value,
-    probe_on_open: el('setProbeOnOpen').value,
+    probe_on_open: el('setProbeOnOpen').checked ? '1' : '0',
   });
   await reload();
   toast('设置已保存');
