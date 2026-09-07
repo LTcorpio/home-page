@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -65,6 +66,28 @@ func userGroups(r *http.Request) []string {
 	return out
 }
 
+// isAdminRequest 当前尚未引入鉴权：以「是否本机访问」作为管理员依据。
+// 本机（localhost / 127.0.0.1 / ::1）视为管理员模式；局域网 IP 访问视为游客模式。
+func isAdminRequest(r *http.Request) bool {
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+// requireAdmin 管理接口保护：游客模式访问返回 403
+func requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !isAdminRequest(r) {
+			writeErr(w, 403, "游客模式无此权限，请通过本机地址访问（http://localhost）")
+			return
+		}
+		next(w, r)
+	}
+}
+
 // ---------------------------------------------------------------- 页面
 
 func serveIndex(w http.ResponseWriter, r *http.Request) {
@@ -109,6 +132,7 @@ func handleBoard(w http.ResponseWriter, r *http.Request) {
 	}
 	ug := userGroups(r)
 	showDisabled := getSetting("show_disabled") == "1"
+	isAdmin := isAdminRequest(r)
 	byGroup := map[int64][]Item{}
 	for _, it := range items {
 		if it.Hidden && !showDisabled {
@@ -117,7 +141,9 @@ func handleBoard(w http.ResponseWriter, r *http.Request) {
 		if !it.allows(ug) {
 			continue
 		}
-		it.Memo = "" // 备忘录仅管理端可见，公开看板不返回
+		if !isAdmin {
+			it.Memo = "" // 备忘录仅管理员（本机访问）可见，游客看板不返回
+		}
 		byGroup[it.GroupID] = append(byGroup[it.GroupID], it)
 	}
 	out := make([]boardGroup, 0, len(groups)+1)
@@ -140,8 +166,9 @@ func handleBoard(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"settings": settings,
 		"groups":   out,
-		"features": map[string]bool{
+		"features": map[string]any{
 			"docker": getSetting("docker_enabled") == "1" && dockerAvailable(),
+			"admin":  isAdminRequest(r),
 		},
 		"now": time.Now().Format("2006-01-02 15:04:05"),
 	})
@@ -616,22 +643,23 @@ func main() {
 	mux.Handle("GET /assets/", noStore(http.FileServer(http.FS(webRoot))))
 	mux.Handle("GET /icons/", http.StripPrefix("/icons/", http.FileServer(http.Dir(iconDir))))
 	mux.HandleFunc("GET /{$}", serveIndex) // 仅精确匹配根路径，其余路径 404
-	mux.HandleFunc("GET /admin", serveAdmin)
+	mux.HandleFunc("GET /admin", requireAdmin(serveAdmin))
 
 	mux.HandleFunc("GET /api/board", handleBoard)
 	mux.HandleFunc("GET /api/status", handleStatus)
 	mux.HandleFunc("POST /api/probe", handleProbeNow)
 	mux.HandleFunc("GET /api/containers", handleContainerList)
-	mux.HandleFunc("POST /api/containers/{name}/{action}", handleContainerAction)
-	mux.HandleFunc("/api/groups", handleGroups)
-	mux.HandleFunc("/api/groups/sort", handleGroupSort)
-	mux.HandleFunc("/api/groups/{id}", handleGroupByID)
-	mux.HandleFunc("/api/items", handleItems)
-	mux.HandleFunc("/api/items/sort", handleItemSort)
-	mux.HandleFunc("/api/items/{id}", handleItemByID)
-	mux.HandleFunc("/api/settings", handleSettings)
-	mux.HandleFunc("POST /api/icons/upload", handleIconUpload)
-	mux.HandleFunc("POST /api/icons/fetch", handleIconFetch)
+	// 以下均为管理操作：仅本机（管理员模式）可访问
+	mux.HandleFunc("POST /api/containers/{name}/{action}", requireAdmin(handleContainerAction))
+	mux.HandleFunc("/api/groups", requireAdmin(handleGroups))
+	mux.HandleFunc("/api/groups/sort", requireAdmin(handleGroupSort))
+	mux.HandleFunc("/api/groups/{id}", requireAdmin(handleGroupByID))
+	mux.HandleFunc("/api/items", requireAdmin(handleItems))
+	mux.HandleFunc("/api/items/sort", requireAdmin(handleItemSort))
+	mux.HandleFunc("/api/items/{id}", requireAdmin(handleItemByID))
+	mux.HandleFunc("/api/settings", requireAdmin(handleSettings))
+	mux.HandleFunc("POST /api/icons/upload", requireAdmin(handleIconUpload))
+	mux.HandleFunc("POST /api/icons/fetch", requireAdmin(handleIconFetch))
 	mux.HandleFunc("GET /api/icons/proxy", handleIconProxy)
 
 	addr := ":" + envOr("PORT", "80")

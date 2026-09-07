@@ -3,7 +3,7 @@
   const state = {
   settings: {},
   groups: [],
-  features: { docker: false },
+  features: { docker: false, admin: false },
   status: { items: {}, containers: {} },
 };
 
@@ -117,7 +117,7 @@ function bindCards() {
   (state.groups || []).forEach((g) => (g.items || []).forEach((it) => { byId[it.id] = it; }));
   document.querySelectorAll('.card').forEach((card) => {
     card.addEventListener('click', () => {
-      const it = byId[card.dataset.id];
+      const it = byId[Number(card.dataset.id)];
       if (!it) return;
       // 长按刚弹出菜单时，忽略紧随其后的 click（部分浏览器仍会补发）
       if (longPressState.card === card && Date.now() - longPressState.at < 600) {
@@ -130,14 +130,18 @@ function bindCards() {
       if (url) window.open(url, '_blank');
     });
     card.addEventListener('contextmenu', (e) => {
+      const it = byId[Number(card.dataset.id)];
+      if (!canShowMenu(it)) return; // 游客或无内容：放行系统默认菜单
       e.preventDefault();
-      const it = byId[card.dataset.id];
-      const name = card.dataset.container;
-      // 禁用的卡片不允许任何操作；绑定容器的卡片（含不可达）保留右键，用于把服务拉起来
-      if (name && it && !it.hidden && state.features.docker) showCtxMenu(e.clientX, e.clientY, card);
+      showCtxMenu(e.clientX, e.clientY, card);
     });
-    bindLongPress(card);
+    if (canShowMenu(byId[Number(card.dataset.id)])) bindLongPress(card);
   });
+}
+
+// 菜单是否可用：管理员模式，且卡片未禁用，且有「容器操作」或「备忘录」内容
+function canShowMenu(it) {
+  return !!(state.features.admin && it && !it.hidden && (!!it.memo || (!!it.container_name && state.features.docker)));
 }
 
 // 移动端：长按 500ms 唤出同一个菜单（仅绑定容器的卡片），滑动即取消
@@ -155,9 +159,8 @@ function bindLongPress(card) {
   };
 
   card.addEventListener('touchstart', (e) => {
-    const it = itemById[card.dataset.id];
-    const name = card.dataset.container;
-    if (!name || !it || it.hidden || !state.features.docker) return; // 无菜单的卡片不拦截
+    const it = itemById[Number(card.dataset.id)];
+    if (!canShowMenu(it)) return; // 无菜单（游客/无内容）不拦截
     const t = e.touches[0];
     if (!t) return;
     start = { x: t.clientX, y: t.clientY };
@@ -213,45 +216,74 @@ function iconHTML(item) {
 const ctx = el('ctxMenu');
 
 function showCtxMenu(x, y, card) {
-  const name = card.dataset.container;
-  const c = (state.status.containers || {})[name];
-  const running = c && c.state === 'running';
-  const statusText = c ? (running ? '运行中' : c.state === 'missing' ? '容器缺失' : '已停止') : '—';
-  ctx.innerHTML = `
-    <div class="ctx-title">${escapeHTML(name)} · ${statusText}</div>
-    ${!running ? `<button data-act="start">启动容器</button>` : ''}
-    ${running ? `<button data-act="stop" class="danger">停止容器</button>` : ''}
-    ${running ? `<button data-act="restart">重启容器</button>` : ''}
-    <button data-act="open">打开链接</button>`;
+  const it = itemById[Number(card.dataset.id)];
+  if (!it) return;
+  ctxOpenedAt = Date.now();
+  const cname = it.container_name || '';
+  const c = cname ? (state.status.containers || {})[cname] : null;
+  const running = !!(c && c.state === 'running');
+  const withDocker = !!(cname && state.features.docker);
+  let title = escapeHTML(it.name);
+  if (withDocker) title += ` · ${c ? (running ? '运行中' : c.state === 'missing' ? '容器缺失' : '已停止') : '—'}`;
+
+  const actions = [];
+  if (withDocker && !running) actions.push('<button data-act="start">启动容器</button>');
+  if (withDocker && running) actions.push('<button data-act="stop" class="danger">停止容器</button>');
+  if (withDocker && running) actions.push('<button data-act="restart">重启容器</button>');
+  if (it.memo) actions.push('<button data-act="memo">查看备注</button>');
+  actions.push('<button data-act="open">打开链接</button>');
+
+  ctx.innerHTML = `<div class="ctx-title">${title}</div>${actions.join('')}`;
   ctx.style.display = 'block';
   ctx.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
     hideCtxMenu();
     const act = b.dataset.act;
+    if (act === 'memo') { openMemoPop(it); return; }
     if (act === 'open') {
       if (card.classList.contains('dead')) {
-        toast(`「${card.dataset.name}」当前不可达`);
+        toast(`「${it.name}」当前不可达`);
         return;
       }
-      const url = chooseAddress(itemById[card.dataset.id]);
+      const url = chooseAddress(it);
       if (url) window.open(url, '_blank');
       return;
     }
-    containerAction(name, act);
+    containerAction(cname, act);
   }));
   // 视口边界自适应
   const r = ctx.getBoundingClientRect();
   const px = Math.min(x, window.innerWidth - r.width - 8);
   const py = Math.min(y, window.innerHeight - r.height - 8);
-  ctx.style.left = px + 'px';
-  ctx.style.top = py + 'px';
+  ctx.style.left = Math.max(8, px) + 'px';
+  ctx.style.top = Math.max(8, py) + 'px';
 }
+
+/* ------------------------------------------------------------ 备忘录浮层 */
+
+const memoMask = el('memoMask');
+
+function openMemoPop(it) {
+  el('memoTitle').textContent = `${it.name} · 备注`;
+  el('memoBody').textContent = it.memo || '';
+  memoMask.style.display = 'flex';
+}
+
+function closeMemoPop() { memoMask.style.display = 'none'; }
+
+el('memoClose').addEventListener('click', closeMemoPop);
+memoMask.addEventListener('click', (e) => { if (e.target === memoMask) closeMemoPop(); });
+
+let ctxOpenedAt = 0; // 菜单打开时间，用于跳过“打开瞬间浏览器补发的滚动事件”
 
 function hideCtxMenu() { ctx.style.display = 'none'; }
 
 document.addEventListener('click', (e) => { if (!ctx.contains(e.target)) hideCtxMenu(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideCtxMenu(); });
 window.addEventListener('blur', hideCtxMenu);
-window.addEventListener('scroll', hideCtxMenu, true);
+// 滚动关闭菜单：跳过打开后 250ms 内的合成滚动（无实际位移也会触发 scroll）
+window.addEventListener('scroll', () => {
+  if (Date.now() - ctxOpenedAt > 250) hideCtxMenu();
+}, true);
 
 /* ------------------------------------------------------------ 状态 */
 

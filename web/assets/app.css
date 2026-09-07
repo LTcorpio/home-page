@@ -332,6 +332,64 @@ body.no-select, body.no-select * { user-select: none; -webkit-user-select: none;
 .ctx-menu button:hover { background: rgba(255, 255, 255, .1); color: #fff; }
 .ctx-menu button.danger:hover { color: var(--bad); }
 
+/* 备注查看浮层（首页管理员模式） */
+.memo-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(0, 0, 0, .5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.memo-pop {
+  width: min(480px, 100%);
+  max-height: 70vh;
+  overflow: auto;
+  background: #222329;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 16px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .55);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.memo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, .1);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.memo-close {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 8px;
+  display: inline-flex;
+}
+
+.memo-close:hover { color: #fff; background: rgba(255, 255, 255, .1); }
+
+.memo-body {
+  padding: 16px 18px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.memo-empty { color: var(--text-faint); }
+
 /* 触屏设备：菜单项加大，方便手指点按 */
 @media (pointer: coarse) {
   .ctx-menu { min-width: 190px; padding: 8px; }
