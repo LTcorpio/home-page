@@ -387,8 +387,10 @@ async function refreshStatus() {
   try {
     state.status = await api('/api/status');
     applyStatus();
+    return true;
   } catch (e) {
     console.warn('状态刷新失败', e);
+    return false;
   }
 }
 
@@ -402,9 +404,16 @@ async function probeNow() {
   svg.classList.add('spin');
   try {
     await api('/api/probe', { method: 'POST' });
-    state.probed = true; // 探测成功，此后按结果红绿展示
-    await refreshStatus(); // 结果落缓存后按 红/绿 刷新各卡片状态点
+    const got = await refreshStatus(); // 重新拉取本轮结果
+    if (!got) throw new Error('探测结果获取失败');
+    state.probed = true; // 只有真正拿到新一轮结果才算「已探测」，此时才允许红绿展示
   } catch (e) {
+    // 探测链路失败（页面到后端不通 / 结果拉取失败）：无法确认当前真实状态，
+    // 撤掉之前展示的探测结果回灰点，避免把上一轮的过期红绿当成当前状态（如断网时仍全绿）
+    if (String(state.settings.probe_interval ?? 20) === '0') {
+      state.status = { ...state.status, items: {} };
+      applyStatus();
+    }
     toast(`探测失败: ${e.message}`);
   } finally {
     state.probingRequest = false;
