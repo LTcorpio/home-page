@@ -83,9 +83,8 @@ func userGroups(r *http.Request) []string {
 	return out
 }
 
-// isAdminRequest 当前尚未引入鉴权：以「是否本机访问」作为管理员依据。
-// 本机（localhost / 127.0.0.1 / ::1）视为管理员模式；局域网 IP 访问视为游客模式。
-func isAdminRequest(r *http.Request) bool {
+// isLocalRequest 请求来源是否为本机（localhost / 127.0.0.1 / ::1）
+func isLocalRequest(r *http.Request) bool {
 	host := r.Host
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
@@ -93,6 +92,10 @@ func isAdminRequest(r *http.Request) bool {
 	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
 	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
+
+// isAdminRequest 当前尚未引入鉴权：以「是否本机访问」作为管理员依据。
+// 本机（localhost / 127.0.0.1 / ::1）视为管理员模式；局域网 IP 访问视为游客模式。
+func isAdminRequest(r *http.Request) bool { return isLocalRequest(r) }
 
 // requireAdmin 管理接口保护：游客模式访问返回 403
 func requireAdmin(next http.HandlerFunc) http.HandlerFunc {
@@ -191,45 +194,6 @@ func handleBoard(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---------------------------------------------------------------- 状态
-
-func handleStatus(w http.ResponseWriter, r *http.Request) {
-	items, err := listItems()
-	if err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	ug := userGroups(r)
-	status := map[string]ProbeResult{}
-	names := []string{}
-	for _, it := range items {
-		if it.Hidden || !it.allows(ug) {
-			continue
-		}
-		if res, ok := probeResult(it.ID); ok {
-			status[strconv.FormatInt(it.ID, 10)] = res
-		}
-		if it.ContainerName != "" {
-			names = append(names, splitContainers(it.ContainerName)...)
-		}
-	}
-	sort.Strings(names)
-	refreshContainers()
-	writeJSON(w, map[string]any{
-		"items":      status,
-		"containers": whitelistContainers(names),
-		"updated":    time.Now().Format("15:04:05"),
-		"probing":    probing(), // 是否有一轮探测在跑：前端据此判断「逐项结果是否已全部产出」
-	})
-}
-
-func handleProbeNow(w http.ResponseWriter, _ *http.Request) {
-	// 异步触发：接管即清空缓存并置 probing，随后后台逐项探测、逐项写入。
-	// 立即返回，前端轮询 /api/status 逐项展示（哪个先探测完就先显示）。
-	startProbeRound()
-	writeJSON(w, map[string]bool{"ok": true})
-}
-
 // ---------------------------------------------------------------- 容器
 
 // containerWhitelist 卡片里绑定过的容器名列表（白名单；一张卡片可绑定多个，逗号分隔）
@@ -288,7 +252,6 @@ func handleContainerAction(w http.ResponseWriter, r *http.Request) {
 	ctLastPick = time.Time{} // 强制下次立即刷新
 	ctMu.Unlock()
 	refreshContainers()
-	startProbeRound()
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
@@ -405,7 +368,6 @@ func handleItemContainerAction(w http.ResponseWriter, r *http.Request) {
 	ctLastPick = time.Time{} // 强制下次立即刷新
 	ctMu.Unlock()
 	refreshContainers()
-	startProbeRound()
 	writeJSON(w, map[string]any{"ok": firstErr == "", "error": firstErr, "results": results})
 }
 
@@ -629,7 +591,6 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 500, err.Error())
 			return
 		}
-		wakeProbe() // 探测间隔等设置即时生效
 		s, _ := listSettings()
 		writeJSON(w, s)
 	}
@@ -754,7 +715,6 @@ func noStore(next http.Handler) http.Handler {
 
 func main() {
 	initStore()
-	startProbeLoop()
 	startContainerLoop()
 
 	webRoot, err := fs.Sub(webFS, "web")
@@ -769,8 +729,6 @@ func main() {
 	mux.HandleFunc("GET /admin", requireAdmin(serveAdmin))
 
 	mux.HandleFunc("GET /api/board", handleBoard)
-	mux.HandleFunc("GET /api/status", handleStatus)
-	mux.HandleFunc("POST /api/probe", handleProbeNow)
 	mux.HandleFunc("GET /api/containers", handleContainerList)
 	// 以下均为管理操作：仅本机（管理员模式）可访问
 	mux.HandleFunc("POST /api/containers/{name}/{action}", requireAdmin(handleContainerAction))

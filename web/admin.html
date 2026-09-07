@@ -99,16 +99,6 @@
             <h3>检测与控制</h3>
             <div class="form-grid">
               <div class="field">
-                <label>可达性轮询间隔（秒）</label>
-                <input type="number" id="setInterval" min="0" max="600" />
-                <div class="sub">0 = 关闭轮询；最小值 5 秒。改动即时生效，无需重启。</div>
-              </div>
-              <div class="field">
-                <span class="lbl">打开页面时立即探测</span>
-                <label class="switch" title="开启 / 关闭"><input type="checkbox" id="setProbeOnOpen" /><span class="track"></span></label>
-                <div class="sub">开启：每次打开首页自动触发一轮探测；关闭：仅点右上角刷新按钮时手动探测。</div>
-              </div>
-              <div class="field">
                 <span class="lbl">Docker 启停控制</span>
                 <label class="switch" title="启用 / 停用"><input type="checkbox" id="setDocker" /><span class="track"></span></label>
                 <div class="sub">开启：卡片绑定容器后，右键卡片即可启停。</div>
