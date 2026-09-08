@@ -13,6 +13,10 @@
 
   <!-- 右上角浮动条：访问地址切换 + 手动探测刷新 + 管理入口(仅管理员) -->
   <div class="float-bar">
+    <span class="net-chip user-chip" id="userChip" title="当前登录身份">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span id="userChipText">未登录</span>
+    </span>
     <button class="net-chip" id="netMode" title="点击切换访问地址模式">
       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
       <span id="netModeText">自动</span>
@@ -49,7 +53,7 @@
             </label>
           </div>
         </div>
-        <div class="hint">开启后每次打开首页先立即探测一轮，无需等待自动重探。</div>
+        <div class="hint">开启后每次打开首页先立即探测一轮，无需等待自动重探；关闭（默认）时首轮结果需等到第一个自动重探周期，或点右上角刷新按钮立即探测。</div>
         <div class="sec">时钟显示</div>
         <div class="srow">
           <span class="lbl">显示秒</span>

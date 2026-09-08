@@ -4,6 +4,7 @@ const state = {
   settings: {},
   groups: [],
   features: { docker: false, admin: false },
+  identity: {},     // 当前 SSO 登录身份：{user,name,email,groups}（匿名时为空对象）
   probes: {},     // 浏览器直连可达性结果：id -> {online, error?, ts}
   containers: {}, // 容器运行状态：name -> {state, ...}（来自 /api/containers）
   probing: false, // 是否有探测轮次在跑（刷新按钮旋转 + 未出结果的卡片呼吸等待）
@@ -15,7 +16,7 @@ const toastBox = el('toast');
 /* ------------------------------------------------ 前端偏好（localStorage，仅当前浏览器生效） */
 // 自动探测偏好：旧版「轮询间隔 / 首次加载探测」原为后端全局配置，随后端探测一起移除；
 // 现探测在浏览器内进行，自动重探节奏与时钟显示偏好改为按设备保存在本机，可随时在右上角「页面偏好」调整。
-const PREFS = { autoSec: 20, onOpen: true, clockSec: false }; // 默认：每 20 秒自动重探 + 打开立即探测 + 时钟不显示秒
+const PREFS = { autoSec: 20, onOpen: false, clockSec: false }; // 默认：每 20 秒自动重探 + 打开页面不立即探测 + 时钟不显示秒
 const PREFS_KEYS = { autoSec: 'hp:autoSec', onOpen: 'hp:onOpen', clockSec: 'hp:clockSec' };
 
 function readPrefs() {
@@ -548,6 +549,26 @@ function tickClock() {
   el('clockWeek').textContent = weekdays[d.getDay()];
 }
 
+/* ------------------------------------------------------------ 当前登录身份 */
+
+// 右上角只读展示「我是谁」：显示名优先，悬停显示账号与所属 SSO 组；
+// 未携带身份头（匿名）时显示「未登录」，此时只能看到未设访问组的公开卡片
+function renderIdentity() {
+  const id = state.identity || {};
+  const chip = el('userChip');
+  const label = id.name || id.user || '';
+  const groups = Array.isArray(id.groups) ? id.groups : [];
+  if (label) {
+    chip.classList.remove('guest');
+    el('userChipText').textContent = label;
+    chip.title = `已登录：${id.user || label}（组：${groups.length ? groups.join('、') : '无'}）`;
+  } else {
+    chip.classList.add('guest');
+    el('userChipText').textContent = '未登录';
+    chip.title = '未携带 SSO 身份（匿名访客），仅显示公开卡片';
+  }
+}
+
 /* ------------------------------------------------------------ 启动 */
 
 const setPop = el('setPop');
@@ -589,7 +610,7 @@ function bindSetPop() {
   });
   el('setReset').addEventListener('click', () => {
     setPop.style.display = 'none';
-    applyPrefs(20, true, false, '已恢复默认：自动重探每 20 秒、打开页面立即探测、时间不显示秒');
+    applyPrefs(20, false, false, '已恢复默认：自动重探每 20 秒、打开页面不立即探测、时间不显示秒');
   });
   document.addEventListener('click', (e) => {
     if (!setPop.contains(e.target)) setPop.style.display = 'none';
@@ -606,7 +627,9 @@ async function boot() {
     state.settings = data.settings || {};
     state.groups = data.groups || [];
     state.features = data.features || state.features;
-    // 管理员入口：仅管理员（本机访问）显示，游客不渲染入口
+    state.identity = data.identity || {};
+    renderIdentity(); // 右上角展示当前登录身份（SSO 用户名与所属组）
+    // 管理员入口：仅管理员（SSO 管理员组）显示，游客不渲染入口
     el('adminLink').style.display = state.features.admin ? '' : 'none';
     const byId = {};
     (state.groups || []).forEach((g) => (g.items || []).forEach((it) => { byId[it.id] = it; }));
@@ -628,7 +651,8 @@ async function boot() {
   refreshContainers();
   setInterval(refreshContainers, 10000);
   // 可达性（间隔与开关可在右上角「页面偏好」调整，存本机）：
-  // 打开页面默认立即探测一轮；之后页面可见时按 PREFS.autoSec 自动重探（0 = 关闭，仅手动/切模式探测）
+  // 默认不立即探测：只靠自动重探按 PREFS.autoSec 出首轮（0 = 关闭自动重探，仅手动/切模式探测）；
+  // 打开页面是否先探一轮由 PREFS.onOpen 决定，可在右上角「页面偏好」开启
   if (PREFS.onOpen) probeAll(true);
   armAutoProbe();
 }

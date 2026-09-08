@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -160,11 +159,13 @@ func tableHasColumn(table, col string) bool {
 var defaultSettings = map[string]string{
 	"site_title":          "Home",
 	"docker_enabled":      "1",
-	"show_disabled":       "1", // 本机(管理员)首页是否置灰显示禁用卡；1=显示（便于管理核对）
-	"show_disabled_guest": "0", // 访客首页是否置灰显示禁用卡；0=不显示（访客看不到，仅管理员可选开）
-	"background_image":    "",  // 壁纸地址，如 /icons/bg.jpg；留空用深色渐变兜底
-	"background_mask":     "0", // 壁纸上的黑色遮罩透明度 0~1
-	"background_blur":     "2", // 壁纸模糊 px
+	"show_disabled":       "1",             // 管理员首页是否置灰显示禁用卡；1=显示（便于管理核对）
+	"show_disabled_guest": "0",             // 访客首页是否置灰显示禁用卡；0=不显示（访客看不到，仅管理员可选开）
+	"admin_groups":        "admins",        // 拥有管理后台权限的 SSO 用户组（逗号分隔，取自 SSO 网关 Remote-Groups）
+	"known_groups":        "admins,family", // 卡片「访问组」的候选组（仅作下拉提示，不限制自由填写）
+	"background_image":    "",              // 壁纸地址，如 /icons/bg.jpg；留空用深色渐变兜底
+	"background_mask":     "0",             // 壁纸上的黑色遮罩透明度 0~1
+	"background_blur":     "2",             // 壁纸模糊 px
 	"max_width":           "1200",
 }
 
@@ -425,26 +426,25 @@ func boolInt(b bool) int {
 	return 0
 }
 
-// parseACL 预留：解析卡片允许访问的用户组（逗号分隔）
-func parseACL(raw string) []string {
-	out := []string{}
-	for _, g := range strings.Split(raw, ",") {
-		if g = strings.TrimSpace(g); g != "" {
-			out = append(out, g)
-		}
-	}
-	return out
-}
+// parseACL 解析卡片允许访问的用户组：支持英文逗号 / 中文逗号 / 空格分隔（与容器名解析同规则）
+func parseACL(raw string) []string { return splitContainers(raw) }
 
-// allows 预留：判断用户组是否有权限访问该卡片
-// 卡片未声明 acl 视为公开；未携带身份头（groups 为空）时不做过滤
-func (it Item) allows(userGroups []string) bool {
+// allows 判断该卡片对当前身份是否可见：
+//   - 管理员（所属组命中 admin_groups）看全部卡片，便于核对与管理
+//   - 卡片未声明访问组（acl 留空）= 公开，所有人可见
+//   - 否则要求用户所属组与卡片访问组有交集
+//
+// 注意：不再有「未携带身份头即放行」的兜底——匿名请求组为空，只会看到公开卡
+func (it Item) allows(groups []string, isAdmin bool) bool {
+	if isAdmin {
+		return true
+	}
 	acl := parseACL(it.ACL)
-	if len(userGroups) == 0 || len(acl) == 0 {
+	if len(acl) == 0 {
 		return true
 	}
 	for _, a := range acl {
-		for _, g := range userGroups {
+		for _, g := range groups {
 			if a == g {
 				return true
 			}

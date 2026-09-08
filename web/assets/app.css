@@ -158,6 +158,11 @@ body.no-select, body.no-select * { user-select: none; -webkit-user-select: none;
 .net-chip svg { flex: none; }
 .net-chip:hover { color: var(--text); background: var(--card-bg-hover); }
 
+/* 当前登录身份（只读展示，不可点击） */
+.user-chip { cursor: default; }
+.user-chip:hover { color: var(--text-dim); background: var(--card-bg); }
+.user-chip.guest { color: var(--text-faint); }
+
 /* 自动探测设置弹层（右上角浮条，前端偏好存本机） */
 .float-group { position: relative; display: inline-flex; }
 
