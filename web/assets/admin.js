@@ -305,6 +305,19 @@ async function saveModal() {
 
 /* ------------------------------------------------------------ 设置 */
 
+// 卡片「访问组」输入框的下拉候选（来自设置 known_groups，仅作提示，不限制填写）
+function fillAclOptions(known) {
+  const dl = el('aclGroups');
+  if (!dl) return;
+  dl.innerHTML = '';
+  (known || '').split(/[,，\s]+/).forEach((g) => {
+    if (!g) return;
+    const o = document.createElement('option');
+    o.value = g;
+    dl.appendChild(o);
+  });
+}
+
 function renderSettings() {
   const s = state.settings;
   el('setTitle').value = s.site_title || '';
@@ -315,6 +328,9 @@ function renderSettings() {
   el('setDocker').checked = s.docker_enabled !== '0';
   el('setShowDisabled').checked = s.show_disabled === '1';
   el('setShowDisabledGuest').checked = s.show_disabled_guest === '1';
+  el('setAdminGroups').value = s.admin_groups || 'admins';
+  el('setKnownGroups').value = s.known_groups || '';
+  fillAclOptions(s.known_groups || '');
   const b = el('dockerBadge');
   b.textContent = state.features.docker ? 'Docker 已就绪' : 'Docker 未启用';
   b.className = 'badge ' + (state.features.docker ? 'on' : 'off');
@@ -330,6 +346,8 @@ async function saveSettings() {
     docker_enabled: el('setDocker').checked ? '1' : '0',
     show_disabled: el('setShowDisabled').checked ? '1' : '0',
     show_disabled_guest: el('setShowDisabledGuest').checked ? '1' : '0',
+    admin_groups: el('setAdminGroups').value.trim() || 'admins',
+    known_groups: el('setKnownGroups').value.trim(),
   });
   await reload();
   toast('设置已保存');

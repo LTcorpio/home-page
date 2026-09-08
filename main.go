@@ -68,40 +68,109 @@ func splitContainers(raw string) []string {
 	return out
 }
 
-// userGroups 预留：从反代注入的身份头读取用户组（当前未启用鉴权，仅做记录与过滤准备）
-func userGroups(r *http.Request) []string {
+// ---------------------------------------------------------------- 身份（SSO / Authelia）
+
+// identity 经 SSO 认证后的用户身份，取自 nginx 反代注入的可信头
+// （authelia-auth.inc：Remote-User / Remote-Groups / Remote-Name / Remote-Email）
+type identity struct {
+	User   string   `json:"user"`
+	Name   string   `json:"name"`
+	Email  string   `json:"email"`
+	Groups []string `json:"groups"`
+}
+
+// clientIP 取请求来源 IP（去掉端口与 IPv6 方括号）
+func clientIP(r *http.Request) net.IP {
+	host := r.RemoteAddr
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return net.ParseIP(strings.Trim(strings.TrimSpace(host), "[]"))
+}
+
+// trustedProxyCIDRs 允许注入身份头的来源网段：默认回环 + 私网。
+// home-page 只监听 127.0.0.1（见 compose 端口绑定），外部设备直连不进来；能连进来的
+// 只有宿主反代（nginx）与同网段容器。注意：经宿主端口转发后，容器看到的源 IP 是
+// VM 侧网关地址（不是 127.0.0.1），故不能只判回环。若部署环境源地址不在默认范围，
+// 用环境变量 TRUSTED_PROXY_CIDRS 覆盖（逗号分隔 CIDR，如 "192.168.215.0/24,127.0.0.0/8"）。
+var trustedProxyCIDRs = func() []*net.IPNet {
+	out := []*net.IPNet{}
+	for _, s := range strings.Split(envOr("TRUSTED_PROXY_CIDRS",
+		// 回环、RFC1918 私网、CGNAT(100.64/10)、链路本地、保留测试段(198.18/15，OrbStack/Clash 用)、IPv6 本机与私网
+		"127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,169.254.0.0/16,198.18.0.0/15,::1/128,fc00::/7"), ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if !strings.Contains(s, "/") { // 允许直接写单个 IP
+			s += "/32"
+		}
+		if _, n, err := net.ParseCIDR(s); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}()
+
+// trustedProxy 身份头只信任指定来源：不在信任网段内的一律按匿名处理，
+// 杜绝客户端自带 Remote-Groups 头伪造身份
+func trustedProxy(r *http.Request) bool {
+	ip := clientIP(r)
+	if ip == nil {
+		return false
+	}
+	for _, n := range trustedProxyCIDRs {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// identify 解析当前请求身份；未携带身份头 = 匿名访客（组为空，只看公开卡）
+func identify(r *http.Request) identity {
+	if !trustedProxy(r) {
+		return identity{}
+	}
 	raw := r.Header.Get("Remote-Groups")
 	if raw == "" {
 		raw = r.Header.Get("X-Remote-Groups")
 	}
-	out := []string{}
+	groups := []string{}
 	for _, g := range strings.Split(raw, ",") {
 		if g = strings.TrimSpace(g); g != "" {
-			out = append(out, g)
+			groups = append(groups, g)
 		}
 	}
-	return out
-}
-
-// isLocalRequest 请求来源是否为本机（localhost / 127.0.0.1 / ::1）
-func isLocalRequest(r *http.Request) bool {
-	host := r.Host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
+	return identity{
+		User:   r.Header.Get("Remote-User"),
+		Name:   r.Header.Get("Remote-Name"),
+		Email:  r.Header.Get("Remote-Email"),
+		Groups: groups,
 	}
-	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
-	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
-// isAdminRequest 当前尚未引入鉴权：以「是否本机访问」作为管理员依据。
-// 本机（localhost / 127.0.0.1 / ::1）视为管理员模式；局域网 IP 访问视为游客模式。
-func isAdminRequest(r *http.Request) bool { return isLocalRequest(r) }
+// isAdmin 是否管理员：所属组命中 admin_groups 设置（默认 admins，可在后台「权限」改）
+func (id identity) isAdmin() bool {
+	for _, a := range parseACL(getSetting("admin_groups")) {
+		for _, g := range id.Groups {
+			if a == g {
+				return true
+			}
+		}
+	}
+	return false
+}
 
-// requireAdmin 管理接口保护：游客模式访问返回 403
+// isAdminRequest 管理员判定：以 SSO 用户组为依据（不再以 localhost 为依据，
+// 因为经 https://home.lan 访问时 Host 不再是 localhost）
+func isAdminRequest(r *http.Request) bool { return identify(r).isAdmin() }
+
+// requireAdmin 管理接口保护：非管理员返回 403
 func requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !isAdminRequest(r) {
-			writeErr(w, 403, "游客模式无此权限，请通过本机地址访问（http://localhost）")
+			writeErr(w, 403, "需要管理员权限：请以管理员组账号登录（当前账号不属于 "+getSetting("admin_groups")+"）")
 			return
 		}
 		next(w, r)
@@ -150,10 +219,10 @@ func handleBoard(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	ug := userGroups(r)
-	showDisabled := getSetting("show_disabled") == "1"            // 本机(管理员)视角
+	id := identify(r)                                             // SSO 身份（匿名时组为空）
+	isAdmin := id.isAdmin()                                       // 管理员：组命中 admin_groups
+	showDisabled := getSetting("show_disabled") == "1"            // 管理员视角
 	showDisabledGuest := getSetting("show_disabled_guest") == "1" // 访客视角
-	isAdmin := isAdminRequest(r)
 	byGroup := map[int64][]Item{}
 	for _, it := range items {
 		if it.Hidden {
@@ -166,11 +235,12 @@ func handleBoard(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-		if !it.allows(ug) {
+		// 可访问性：管理员看全部；访客只看公开卡 + 授权给自己组的卡
+		if !it.allows(id.Groups, isAdmin) {
 			continue
 		}
 		if !isAdmin {
-			it.Memo = "" // 备忘录仅管理员（本机访问）可见，游客看板不返回
+			it.Memo = "" // 备忘录仅管理员可见，访客看板不返回
 		}
 		byGroup[it.GroupID] = append(byGroup[it.GroupID], it)
 	}
@@ -196,9 +266,10 @@ func handleBoard(w http.ResponseWriter, r *http.Request) {
 		"groups":   out,
 		"features": map[string]any{
 			"docker": getSetting("docker_enabled") == "1" && dockerAvailable(),
-			"admin":  isAdminRequest(r),
+			"admin":  isAdmin,
 		},
-		"now": time.Now().Format("2006-01-02 15:04:05"),
+		"identity": id, // 当前登录身份（匿名时 user 为空）
+		"now":      time.Now().Format("2006-01-02 15:04:05"),
 	})
 }
 

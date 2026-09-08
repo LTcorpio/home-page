@@ -115,6 +115,21 @@
               </div>
             </div>
           </div>
+          <div class="card-panel">
+            <h3>权限（SSO）</h3>
+            <div class="form-grid">
+              <div class="field full">
+                <label>管理员组</label>
+                <input type="text" id="setAdminGroups" placeholder="admins" />
+                <div class="sub">属于该组的账号（Authelia 注入的组）即为管理员：可进管理后台、启停容器、查看备注，首页也能看到全部卡片。多个组用逗号分隔。</div>
+              </div>
+              <div class="field full">
+                <label>候选用户组</label>
+                <input type="text" id="setKnownGroups" placeholder="admins,family" />
+                <div class="sub">仅用于卡片「访问组」输入框的下拉提示，需与 Authelia 里配置的组名一致；不参与权限判定，也不限制自由填写。</div>
+              </div>
+            </div>
+          </div>
           <div style="text-align:right"><button class="btn primary" id="saveSettings">保存设置</button></div>
         </section>
       </div>
@@ -156,7 +171,7 @@
         <div class="field"><span class="lbl">状态探测</span><label class="switch" title="开启 / 关闭"><input type="checkbox" id="fProbe" checked /><span class="track"></span></label>
           <div class="sub">开启：探测可达性，离线时卡片置灰不可点。</div>
         </div>
-        <div class="field"><label>访问组（预留）</label><input type="text" id="fAcl" placeholder="逗号分隔，留空=公开" /></div>
+        <div class="field full"><label>访问组（SSO 用户组，逗号分隔，留空=所有人可见）</label><input type="text" id="fAcl" list="aclGroups" placeholder="例如 admins 或 admins,family" /><datalist id="aclGroups"></datalist><div class="sub">填写后仅该组成员能看到此卡；管理员始终可见。组名来自 Authelia（可在「站点设置 → 权限」维护候选组）。</div></div>
         <div class="field full"><label>备忘录（仅管理后台可见，可记录凭证）</label><textarea id="fMemo" rows="3" placeholder="例如：后台账号 / 端口说明 / 续费提醒…"></textarea></div>
       </div>
       <div class="modal-foot">
