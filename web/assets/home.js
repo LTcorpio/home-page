@@ -14,9 +14,9 @@ const el = (id) => document.getElementById(id);
 const toastBox = el('toast');
 
 /* ------------------------------------------------ 前端偏好（localStorage，仅当前浏览器生效） */
-// 自动探测偏好：旧版「轮询间隔 / 首次加载探测」原为后端全局配置，随后端探测一起移除；
+// 自动探测偏好：原为后端全局配置，随后端探测一起移除；
 // 现探测在浏览器内进行，自动重探节奏与时钟显示偏好改为按设备保存在本机，可随时在右上角「页面偏好」调整。
-const PREFS = { autoSec: 20, onOpen: false, clockSec: false }; // 默认：每 20 秒自动重探 + 打开页面不立即探测 + 时钟不显示秒
+const PREFS = { autoSec: 0, onOpen: false, clockSec: false }; // 默认：关闭自动重探 + 打开页面不立即探测 + 时钟不显示秒（仅手动刷新 / 容器启停时探测）
 const PREFS_KEYS = { autoSec: 'hp:autoSec', onOpen: 'hp:onOpen', clockSec: 'hp:clockSec' };
 
 function readPrefs() {
@@ -59,66 +59,6 @@ function escapeHTML(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-/* ------------------------------------------------------------ 网络模式（内外网地址切换） */
-
-// 模式说明：auto=自动（本机访问选 lan_url，其余用 url）；lan=局域网(常用地址)；local=本机(localhost)
-const NET_MODES = [
-  { key: 'auto', label: '自动' },
-  { key: 'lan', label: '局域网' },
-  { key: 'local', label: '本机' },
-];
-let netMode = localStorage.getItem('hp:netMode') || 'auto';
-
-// 访客（非本机访问）不能探测/打开自己设备的 localhost：只给 自动/局域网 两档；本机(管理员)才显示「本机」
-function visibleModes() {
-  return state.features.admin ? NET_MODES : NET_MODES.filter((m) => m.key !== 'local');
-}
-
-function netLabel(key) { return (NET_MODES.find((m) => m.key === key) || NET_MODES[0]).label; }
-
-function netModeTitle(key) {
-  return `访问地址：${key === 'auto' ? '自动选择' : key === 'lan' ? '局域网地址（常用）' : '本机地址（localhost）'}，点击切换`;
-}
-
-// 取该卡片应打开的地址：无内网地址时固定用 url
-function chooseAddress(item) {
-  if (!item || !item.lan_url) return item ? item.url : '';
-  if (netMode === 'lan') return item.url;
-  if (netMode === 'local') return item.lan_url;
-  const h = location.hostname;
-  const isLocal = h === 'localhost' || h === '127.0.0.1' || h === '::1';
-  return isLocal ? item.lan_url : item.url;
-}
-
-// 切换模式后同步卡片悬停提示里的地址（点击打开在 click 时实时取 chooseAddress，无需刷新）
-function refreshCardTitles() {
-  document.querySelectorAll('.card').forEach((card) => {
-    const it = itemById[Number(card.dataset.id)];
-    if (!it) return;
-    card.title = it.hidden ? '已禁用' : (chooseAddress(it) || '');
-  });
-}
-
-function bindNetChip() {
-  const chip = el('netMode');
-  el('netModeText').textContent = netLabel(netMode);
-  chip.title = netModeTitle(netMode);
-  chip.addEventListener('click', () => {
-    const modes = visibleModes();
-    const idx = modes.findIndex((m) => m.key === netMode);
-    const next = modes[(idx + 1) % modes.length];
-    netMode = next.key;
-    localStorage.setItem('hp:netMode', next.key);
-    // 只更新界面与卡片地址提示，不做整页刷新，避免闪屏
-    el('netModeText').textContent = next.label;
-    chip.title = netModeTitle(next.key);
-    refreshCardTitles();
-    toast(`访问地址已切换为「${next.label}」`);
-    // 状态点跟随新模式：立即撤旧态并按新模式的地址重新探测、逐项点亮
-    probeAll(true);
-  });
-}
-
 /* ------------------------------------------------------------ 渲染 */
 
 function renderBoard() {
@@ -154,7 +94,7 @@ function renderBoard() {
 }
 
 function cardHTML(item) {
-  const addr = chooseAddress(item) || '';
+  const addr = item.url || '';
   const cls = ['card', item.hidden ? 'disabled' : ''].join(' ');
   return `
     <div class="${cls}" data-id="${item.id}" data-container="${escapeHTML(item.container_name || '')}" data-name="${escapeHTML(item.name || '')}" title="${item.hidden ? '已禁用' : escapeHTML(addr)}">
@@ -183,7 +123,7 @@ function bindCards() {
       }
       if (it.hidden) { toast(`「${it.name}」已禁用`); return; }
       if (card.classList.contains('dead')) { toast(`「${it.name}」当前不可达${reachReason(it.id)}`); return; }
-      const url = chooseAddress(it);
+      const url = it.url;
       if (url) window.open(url, '_blank');
     });
     card.addEventListener('contextmenu', (e) => {
@@ -333,7 +273,7 @@ function showCtxMenu(x, y, card) {
         toast(`「${it.name}」当前不可达${reachReason(it.id)}`);
         return;
       }
-      const url = chooseAddress(it);
+      const url = it.url;
       if (url) window.open(url, '_blank');
       return;
     }
@@ -382,14 +322,14 @@ function reachReason(id) {
   return res && res.error ? `：${res.error}` : '';
 }
 
-// 单张卡片：按当前模式取地址，浏览器直接发请求判定可达性。
+// 单张卡片：用卡片地址（url）让浏览器直接发请求判定可达性。
 // 判定原则：http/https 用 fetch(no-cors)——网络可达即在线（拿不到状态码也不关心 3xx/4xx/5xx），
 // 网络层不通（断网/拒连/域名解析失败/证书不受信任/超时）即离线。
 // 注意：浏览器与服务器容器不同，直接处在真实主机网络栈里，Wi-Fi 断了就必然判红。
 const PROBE_TIMEOUT = 4000; // 单次判定超时
 
 async function probeCard(it) {
-  const addr = chooseAddress(it);
+  const addr = it.url;
   if (!addr) return null;
   if (!/^https?:\/\//i.test(addr)) return null; // 非 Web 地址无法在浏览器判定，跳过（状态点不渲染）
   const ctrl = new AbortController();
@@ -414,20 +354,20 @@ async function probeCard(it) {
 }
 
 // 探测一轮：清空旧结果 → 逐项浏览器直连 → 先完成的先点亮。
-// 支持“打断重来”：切模式/刷新会启动新代次，旧代次未完成的写入一律丢弃（结果不会串模式）。
+// 支持“打断重来”：再次刷新会启动新代次，旧代次未完成的写入一律丢弃（结果不会过期串扰）。
 let probeGen = 0; // 探测代次，启动新轮 +1；旧轮完成时若代次已过期则不再落地
 
 async function probeAll(manual = false) {
   const gen = ++probeGen;
   state.probing = true;
-  state.probes = {}; // 撤掉上一轮/上一模式的旧结果，全部回到灰点，杜绝旧红绿残留
+  state.probes = {}; // 撤掉上一轮的旧结果，全部回到灰点，杜绝旧红绿残留
   const svg = el('refreshBtn').querySelector('svg');
   if (manual) svg.classList.add('spin');
   applyStatus();
   const targets = [];
   (state.groups || []).forEach((g) => (g.items || []).forEach((it) => {
     if (it.hidden || !it.probe) return;
-    const addr = chooseAddress(it);
+    const addr = it.url;
     if (addr && /^https?:\/\//i.test(addr)) targets.push(it); // 仅收集可浏览器判定的 http/https 卡片
   }));
   await Promise.allSettled(targets.map(async (it) => {
@@ -471,7 +411,7 @@ function applyStatus() {
     if (!it) return;
     const res = state.probes[id];
     const dot = card.querySelector('[data-dot]');
-    const addr = chooseAddress(it);
+    const addr = it.url;
     const isWeb = !!(addr && /^https?:\/\//i.test(addr));
 
     // 绑定多容器：任一容器非 running 即视为服务不可用（容器缺失也算不可用）
@@ -552,20 +492,32 @@ function tickClock() {
 /* ------------------------------------------------------------ 当前登录身份 */
 
 // 右上角只读展示「我是谁」：显示名优先，悬停显示账号与所属 SSO 组；
-// 未携带身份头（匿名）时显示「未登录」，此时只能看到未设访问组的公开卡片
+// 未携带身份头（匿名）时显示「未登录」，此时只能看到未设访问组的公开卡片。
+// 配置了认证中心（settings.auth_portal）时 chip 变为可点击链接，跳转登录/切换账号
 function renderIdentity() {
   const id = state.identity || {};
   const chip = el('userChip');
   const label = id.name || id.user || '';
   const groups = Array.isArray(id.groups) ? id.groups : [];
+  const portal = (state.settings && state.settings.auth_portal || '').trim();
+  if (portal) {
+    chip.href = portal;
+    chip.setAttribute('aria-label', '前往认证中心');
+  } else {
+    chip.removeAttribute('href');
+    chip.removeAttribute('aria-label');
+  }
   if (label) {
     chip.classList.remove('guest');
     el('userChipText').textContent = label;
-    chip.title = `已登录：${id.user || label}（组：${groups.length ? groups.join('、') : '无'}）`;
+    const who = `已登录：${id.user || label}（组：${groups.length ? groups.join('、') : '无'}）`;
+    chip.title = portal ? `${who}；点击前往认证中心登录 / 切换账号` : who;
   } else {
     chip.classList.add('guest');
     el('userChipText').textContent = '未登录';
-    chip.title = '未携带 SSO 身份（匿名访客），仅显示公开卡片';
+    chip.title = portal
+      ? '未登录（匿名访客）：点击前往认证中心登录，当前仅显示公开卡片'
+      : '未携带 SSO 身份（匿名访客），仅显示公开卡片';
   }
 }
 
@@ -610,7 +562,7 @@ function bindSetPop() {
   });
   el('setReset').addEventListener('click', () => {
     setPop.style.display = 'none';
-    applyPrefs(20, false, false, '已恢复默认：自动重探每 20 秒、打开页面不立即探测、时间不显示秒');
+    applyPrefs(0, false, false, '已恢复默认：关闭自动重探、打开页面不立即探测、时间不显示秒');
   });
   document.addEventListener('click', (e) => {
     if (!setPop.contains(e.target)) setPop.style.display = 'none';
@@ -619,7 +571,7 @@ function bindSetPop() {
 }
 
 async function boot() {
-  readPrefs(); // 先读回本机偏好（自动重探间隔 / 打开页面立即探测）
+  readPrefs(); // 先读回本机浏览器里保存的偏好（自动重探间隔 / 打开页面立即探测）
   tickClock();
   setInterval(tickClock, 1000);
   try {
@@ -639,20 +591,14 @@ async function boot() {
     el('board').innerHTML = `<div class="empty">加载失败：${escapeHTML(e.message)}</div>`;
     return;
   }
-  // 访客（非本机访问）不可探测/打开 localhost：残留的「本机」模式强制回落局域网
-  if (!state.features.admin && netMode === 'local') {
-    netMode = 'lan';
-    localStorage.setItem('hp:netMode', 'lan');
-  }
-  bindNetChip();
   bindSetPop();
   el('refreshBtn').addEventListener('click', () => probeAll(true));
   // 容器状态：首次拉取后每 10 秒刷新（仅做 dead 判定与右键菜单摘要）
   refreshContainers();
   setInterval(refreshContainers, 10000);
   // 可达性（间隔与开关可在右上角「页面偏好」调整，存本机）：
-  // 默认不立即探测：只靠自动重探按 PREFS.autoSec 出首轮（0 = 关闭自动重探，仅手动/切模式探测）；
-  // 打开页面是否先探一轮由 PREFS.onOpen 决定，可在右上角「页面偏好」开启
+  // 默认两项均关闭（autoSec=0 且 onOpen=false）：页面打开不做任何自动探测，
+  // 仅手动刷新 / 容器启停时触发；开启任一偏好即按各自节奏自动探测
   if (PREFS.onOpen) probeAll(true);
   armAutoProbe();
 }
