@@ -104,9 +104,9 @@
                 <div class="sub">开启：卡片绑定容器后，右键卡片即可启停。</div>
               </div>
               <div class="field">
-                <span class="lbl">本机首页显示禁用卡片</span>
+                <span class="lbl">管理员首页显示禁用卡片</span>
                 <label class="switch" title="开启 / 关闭"><input type="checkbox" id="setShowDisabled" /><span class="track"></span></label>
-                <div class="sub">开启：管理员在本机（localhost）首页置灰显示禁用卡（不可打开）；关闭：隐藏。</div>
+                <div class="sub">开启：管理员（SSO 管理员组账号）首页置灰显示禁用卡（不可打开）；关闭：隐藏。</div>
               </div>
               <div class="field">
                 <span class="lbl">访客首页显示禁用卡片</span>
@@ -128,6 +128,11 @@
                 <input type="text" id="setKnownGroups" placeholder="admins,family" />
                 <div class="sub">仅用于卡片「访问组」输入框的下拉提示，需与 SSO 网关 里配置的组名一致；不参与权限判定，也不限制自由填写。</div>
               </div>
+              <div class="field full">
+                <label>认证中心地址</label>
+                <input type="text" id="setAuthPortal" placeholder="" />
+                <div class="sub">首页右上角身份 chip 点击跳转的门户（登录 / 切换账号）；通常为 SSO 网关 门户地址，留空则 chip 不可点击。</div>
+              </div>
             </div>
           </div>
           <div style="text-align:right"><button class="btn primary" id="saveSettings">保存设置</button></div>
@@ -144,8 +149,7 @@
       <input type="hidden" id="fId" />
       <div class="form-grid">
         <div class="field full"><label>名称 *</label><input type="text" id="fName" /></div>
-        <div class="field"><label>地址（局域网常用）</label><input type="url" id="fUrl" placeholder="http://192.0.2.10:8080" /></div>
-        <div class="field"><label>本机地址（localhost）</label><input type="url" id="fLanUrl" placeholder="http://localhost:5197（可选）" /></div>
+        <div class="field full"><label>地址 *</label><input type="url" id="fUrl" placeholder="https://service.example.com/ 或 http://192.0.2.10:8080" /></div>
         <div class="field full"><label>描述</label><input type="text" id="fDesc" /></div>
         <div class="field"><label>分组</label><select id="fGroup"></select></div>
         <div class="field"><span class="lbl">启用</span><label class="switch" title="启用 / 禁用"><input type="checkbox" id="fStatus" checked /><span class="track"></span></label></div>

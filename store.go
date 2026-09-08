@@ -39,8 +39,7 @@ type Item struct {
 	ID            int64  `json:"id"`
 	GroupID       int64  `json:"group_id"`
 	Name          string `json:"name"`
-	URL           string `json:"url"`     // 常用地址（局域网 / 外网）
-	LanURL        string `json:"lan_url"` // 本机地址（localhost，可选）
+	URL           string `json:"url"` // 访问地址（SSO 统一入口或内网直连地址）
 	Description   string `json:"description"`
 	IconType      string `json:"icon_type"`      // auto | upload | text
 	IconValue     string `json:"icon_value"`     // upload=文件名, text=文字, auto=留空
@@ -96,7 +95,6 @@ func migrate() {
 			group_id       INTEGER NOT NULL DEFAULT 0,
 			name           TEXT NOT NULL,
 			url            TEXT NOT NULL DEFAULT '',
-			lan_url        TEXT NOT NULL DEFAULT '',
 			description    TEXT NOT NULL DEFAULT '',
 			icon_type      TEXT NOT NULL DEFAULT 'auto',
 			icon_value     TEXT NOT NULL DEFAULT '',
@@ -122,7 +120,6 @@ func migrate() {
 	}
 	// 兼容旧库：补充后加的列
 	for _, col := range []struct{ name, ddl string }{
-		{"lan_url", "ALTER TABLE items ADD COLUMN lan_url TEXT NOT NULL DEFAULT ''"},
 		{"memo", "ALTER TABLE items ADD COLUMN memo TEXT NOT NULL DEFAULT ''"},
 	} {
 		if !tableHasColumn("items", col.name) {
@@ -131,6 +128,14 @@ func migrate() {
 			} else {
 				log.Printf("已给 items 补充列 %s", col.name)
 			}
+		}
+	}
+	// 移除已废弃的「本机地址」列（内外网地址切换已删除，只保留 url）
+	if tableHasColumn("items", "lan_url") {
+		if _, err := db.Exec(`ALTER TABLE items DROP COLUMN lan_url`); err != nil {
+			log.Printf("删除 items.lan_url 列失败: %v", err)
+		} else {
+			log.Printf("已删除废弃列 items.lan_url（地址切换功能已移除，仅保留 url）")
 		}
 	}
 }
@@ -159,13 +164,14 @@ func tableHasColumn(table, col string) bool {
 var defaultSettings = map[string]string{
 	"site_title":          "Home",
 	"docker_enabled":      "1",
-	"show_disabled":       "1",             // 管理员首页是否置灰显示禁用卡；1=显示（便于管理核对）
-	"show_disabled_guest": "0",             // 访客首页是否置灰显示禁用卡；0=不显示（访客看不到，仅管理员可选开）
-	"admin_groups":        "admins",        // 拥有管理后台权限的 SSO 用户组（逗号分隔，取自 SSO 网关 Remote-Groups）
-	"known_groups":        "admins,family", // 卡片「访问组」的候选组（仅作下拉提示，不限制自由填写）
-	"background_image":    "",              // 壁纸地址，如 /icons/bg.jpg；留空用深色渐变兜底
-	"background_mask":     "0",             // 壁纸上的黑色遮罩透明度 0~1
-	"background_blur":     "2",             // 壁纸模糊 px
+	"show_disabled":       "1",                          // 管理员首页是否置灰显示禁用卡；1=显示（便于管理核对）
+	"show_disabled_guest": "0",                          // 访客首页是否置灰显示禁用卡；0=不显示（访客看不到，仅管理员可选开）
+	"admin_groups":        "admins",                     // 拥有管理后台权限的 SSO 用户组（逗号分隔，取自 SSO 网关 Remote-Groups）
+	"known_groups":        "admins,family,guest",        // 卡片「访问组」的候选组（仅作下拉提示，不限制自由填写；guest 为免登录访客身份）
+	"auth_portal":         "", // SSO 认证中心地址：右上角身份 chip 点击跳转（切换/登录账号）；留空则 chip 不可点
+	"background_image":    "",                           // 壁纸地址，如 /icons/bg.jpg；留空用深色渐变兜底
+	"background_mask":     "0",                          // 壁纸上的黑色遮罩透明度 0~1
+	"background_blur":     "2",                          // 壁纸模糊 px
 	"max_width":           "1200",
 }
 
@@ -277,13 +283,13 @@ func reorderGroups(ids []int64) error {
 
 // --- 卡片 ---------------------------------------------------------------
 
-const itemCols = `id, group_id, name, url, lan_url, description, icon_type, icon_value,
+const itemCols = `id, group_id, name, url, description, icon_type, icon_value,
 	container_name, probe, sort, hidden, acl, memo, created_at, updated_at`
 
 func scanItem(rows *sql.Rows) (Item, error) {
 	var it Item
 	var probe, hidden int
-	err := rows.Scan(&it.ID, &it.GroupID, &it.Name, &it.URL, &it.LanURL, &it.Description,
+	err := rows.Scan(&it.ID, &it.GroupID, &it.Name, &it.URL, &it.Description,
 		&it.IconType, &it.IconValue, &it.ContainerName, &probe, &it.Sort, &hidden,
 		&it.ACL, &it.Memo, &it.CreatedAt, &it.UpdatedAt)
 	it.Probe = probe == 1
@@ -327,9 +333,9 @@ func getItem(id int64) (*Item, error) {
 
 func createItem(it Item) (int64, error) {
 	res, err := db.Exec(`INSERT INTO items
-		(group_id, name, url, lan_url, description, icon_type, icon_value, container_name, probe, sort, hidden, acl, memo, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		it.GroupID, it.Name, it.URL, it.LanURL, it.Description, it.IconType, it.IconValue,
+		(group_id, name, url, description, icon_type, icon_value, container_name, probe, sort, hidden, acl, memo, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		it.GroupID, it.Name, it.URL, it.Description, it.IconType, it.IconValue,
 		it.ContainerName, boolInt(it.Probe), it.Sort, boolInt(it.Hidden), it.ACL, it.Memo, nowStr(), nowStr())
 	if err != nil {
 		return 0, err
@@ -338,10 +344,10 @@ func createItem(it Item) (int64, error) {
 }
 
 func updateItem(it Item) error {
-	_, err := db.Exec(`UPDATE items SET group_id = ?, name = ?, url = ?, lan_url = ?, description = ?,
+	_, err := db.Exec(`UPDATE items SET group_id = ?, name = ?, url = ?, description = ?,
 		icon_type = ?, icon_value = ?, container_name = ?, probe = ?, sort = ?, hidden = ?, acl = ?, memo = ?, updated_at = ?
 		WHERE id = ?`,
-		it.GroupID, it.Name, it.URL, it.LanURL, it.Description, it.IconType, it.IconValue,
+		it.GroupID, it.Name, it.URL, it.Description, it.IconType, it.IconValue,
 		it.ContainerName, boolInt(it.Probe), it.Sort, boolInt(it.Hidden), it.ACL, it.Memo, nowStr(), it.ID)
 	return err
 }

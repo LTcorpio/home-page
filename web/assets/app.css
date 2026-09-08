@@ -159,8 +159,9 @@ body.no-select, body.no-select * { user-select: none; -webkit-user-select: none;
 .net-chip:hover { color: var(--text); background: var(--card-bg-hover); }
 
 /* 当前登录身份（只读展示，不可点击） */
-.user-chip { cursor: default; }
-.user-chip:hover { color: var(--text-dim); background: var(--card-bg); }
+.user-chip { cursor: default; text-decoration: none; }
+.user-chip[href] { cursor: pointer; }
+.user-chip[href]:hover { color: var(--text); background: var(--card-bg-hover); }
 .user-chip.guest { color: var(--text-faint); }
 
 /* 自动探测设置弹层（右上角浮条，前端偏好存本机） */
@@ -685,7 +686,7 @@ textarea { min-height: 140px; font-family: ui-monospace, SFMono-Regular, Menlo, 
 .cell-tags .tag { margin-left: 0; margin-right: 6px; }
 
 .cell-addr { min-width: 0; }
-.cell-addr .u, .cell-addr .l {
+.cell-addr .u {
   display: block;
   white-space: nowrap;
   overflow: hidden;
@@ -693,7 +694,6 @@ textarea { min-height: 140px; font-family: ui-monospace, SFMono-Regular, Menlo, 
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
 }
-.cell-addr .l { color: var(--text-faint); font-size: 11px; margin-top: 2px; }
 
 .table td .btn.mini + .btn.mini { margin-left: 4px; }
 

@@ -143,7 +143,6 @@ function renderItems() {
       </td>
       <td class="cell-addr">
         <div class="u" title="${escapeHTML(it.url || '')}">${escapeHTML(it.url || '—')}</div>
-        ${it.lan_url ? `<div class="l" title="${escapeHTML(it.lan_url)}">↳ ${escapeHTML(it.lan_url)}</div>` : ''}
       </td>
       <td class="no-wrap">${escapeHTML(groupName(it.group_id))}</td>
       <td class="no-wrap" style="max-width:150px">${it.container_name ? `<span class="mono" title="${escapeHTML(it.container_name)}">${escapeHTML(it.container_name)}</span>` : '<span class="sub">—</span>'}</td>
@@ -217,7 +216,6 @@ function openModal(id) {
   el('fId').value = editing ? editing.id : '';
   el('fName').value = editing ? editing.name : '';
   el('fUrl').value = editing ? editing.url : '';
-  el('fLanUrl').value = editing ? editing.lan_url || '' : '';
   el('fDesc').value = editing ? editing.description : '';
   el('fGroup').value = editing ? String(editing.group_id) : (state.groups[0] ? String(state.groups[0].id) : '0');
   el('fStatus').checked = !(editing && editing.hidden);
@@ -279,7 +277,6 @@ async function saveModal() {
   const payload = {
     name: el('fName').value.trim(),
     url: el('fUrl').value.trim(),
-    lan_url: el('fLanUrl').value.trim(),
     description: el('fDesc').value.trim(),
     group_id: Number(el('fGroup').value || 0),
     icon_type: iconTypeFinal,
@@ -330,6 +327,7 @@ function renderSettings() {
   el('setShowDisabledGuest').checked = s.show_disabled_guest === '1';
   el('setAdminGroups').value = s.admin_groups || 'admins';
   el('setKnownGroups').value = s.known_groups || '';
+  el('setAuthPortal').value = s.auth_portal || '';
   fillAclOptions(s.known_groups || '');
   const b = el('dockerBadge');
   b.textContent = state.features.docker ? 'Docker 已就绪' : 'Docker 未启用';
@@ -348,6 +346,7 @@ async function saveSettings() {
     show_disabled_guest: el('setShowDisabledGuest').checked ? '1' : '0',
     admin_groups: el('setAdminGroups').value.trim() || 'admins',
     known_groups: el('setKnownGroups').value.trim(),
+    auth_portal: el('setAuthPortal').value.trim(),
   });
   await reload();
   toast('设置已保存');
