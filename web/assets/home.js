@@ -16,10 +16,14 @@ const toastBox = el('toast');
 /* ------------------------------------------------ 前端偏好（localStorage，仅当前浏览器生效） */
 // 自动探测偏好：原为后端全局配置，随后端探测一起移除；
 // 现探测在浏览器内进行，自动重探节奏与时钟显示偏好改为按设备保存在本机，可随时在右上角「页面偏好」调整。
-const PREFS = { autoSec: 0, onOpen: false, clockSec: false }; // 默认：关闭自动重探 + 打开页面不立即探测 + 时钟不显示秒（仅手动刷新 / 容器启停时探测）
-const PREFS_KEYS = { autoSec: 'hp:autoSec', onOpen: 'hp:onOpen', clockSec: 'hp:clockSec' };
+// probeOn = 探测器总开关：关闭（默认）时永不触发任何探测（开页 / 自动重探 / 容器启停 / 手动刷新），
+// 所有状态点保持灰点。开启后才按 autoSec / onOpen 的节奏探测。
+const PREFS = { probeOn: false, autoSec: 0, onOpen: false, clockSec: false }; // 默认：探测器关闭 + 关闭自动重探 + 打开页面不立即探测 + 时钟不显示秒
+const PREFS_KEYS = { probeOn: 'hp:probeOn', autoSec: 'hp:autoSec', onOpen: 'hp:onOpen', clockSec: 'hp:clockSec' };
 
 function readPrefs() {
+  const po = localStorage.getItem(PREFS_KEYS.probeOn);
+  if (po !== null) PREFS.probeOn = po === '1';
   const sec = parseInt(localStorage.getItem(PREFS_KEYS.autoSec), 10);
   if (!Number.isNaN(sec)) PREFS.autoSec = Math.max(0, Math.min(86400, sec));
   const on = localStorage.getItem(PREFS_KEYS.onOpen);
@@ -330,7 +334,9 @@ function downContainers(it) {
 
 // 取卡片离线原因，用于不可达提示与状态点悬停。
 // 顺序：容器未运行（与卡片置灰同源，最可靠）→ 浏览器探测的网络错误。
+// 仅管理员模式才给出具体原因（容器名 / 网络错误细节属于内部信息），游客只看到「当前不可达」。
 function reachReason(id) {
+  if (!state.features.admin) return '';
   const down = downContainers(itemById[id]);
   if (down.length) return `：容器未运行（${down.join('、')}）`;
   const res = state.probes[id];
@@ -373,6 +379,7 @@ async function probeCard(it) {
 let probeGen = 0; // 探测代次，启动新轮 +1；旧轮完成时若代次已过期则不再落地
 
 async function probeAll(manual = false) {
+  if (!PREFS.probeOn) return; // 探测器总开关关闭：任何来源（开页/定时/容器启停/手动）都不探测
   const gen = ++probeGen;
   state.probing = true;
   state.probes = {}; // 撤掉上一轮的旧结果，全部回到灰点，杜绝旧红绿残留
@@ -397,11 +404,11 @@ async function probeAll(manual = false) {
   applyStatus();
 }
 
-// 自动重探调度：按 PREFS.autoSec 起可重启的定时器；间隔为 0 即停用（仅手动/切模式时探测）
+// 自动重探调度：总开关开启且 PREFS.autoSec > 0 时按间隔起可重启的定时器；否则停用（仅手动刷新可探测）
 let autoTimer = null;
 function armAutoProbe() {
   if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
-  if (PREFS.autoSec <= 0) return;
+  if (!PREFS.probeOn || PREFS.autoSec <= 0) return;
   autoTimer = setInterval(() => { if (!document.hidden) probeAll(); }, PREFS.autoSec * 1000);
 }
 
@@ -437,20 +444,21 @@ function applyStatus() {
     dot.title = '';
     if (it.hidden) {
       dot.classList.add('idle');
-    } else if (cDown) {
-      // 容器运行状态优先于浏览器探测：服务停了但 nginx 仍会应答（维护页 / 502），
-      // 而 no-cors 探测读不到状态码、一律判绿，就会出现「绿点却点不开」的矛盾。
-      // 故容器未运行时直接判红，与卡片置灰、「当前不可达」提示保持同源。
-      dot.classList.add('offline');
-      dot.title = `离线：容器未运行（${downNames.join('、')}）`;
     } else if (res) {
-      if (res.online) {
+      // 只有探测过才有红/绿：未触发探测时一律保持灰点，避免开页即出现无依据的颜色。
+      if (cDown) {
+        // 探测结果内部，容器运行状态优先于浏览器探测：服务停了但 nginx 仍会应答（维护页 / 502），
+        // 而 no-cors 探测读不到状态码、一律判绿，会出现「绿点却点不开」的矛盾，
+        // 故容器未运行时判红，与卡片置灰、「当前不可达」提示保持同源。
+        dot.classList.add('offline');
+        dot.title = state.features.admin ? `离线：容器未运行（${downNames.join('、')}）` : '离线';
+      } else if (res.online) {
         dot.classList.add('online');
         dot.title = '在线';
       } else {
         dot.classList.add('offline');
-        // 悬停状态点可看到离线原因（如断网/证书不受信任等）
-        dot.title = res.error ? `离线：${res.error}` : '离线';
+        // 悬停状态点可看到离线原因（仅管理员，如断网/证书不受信任等）
+        dot.title = state.features.admin && res.error ? `离线：${res.error}` : '离线';
       }
     } else if (it.probe && state.probing && isWeb) {
       dot.classList.add('pending'); // 呼吸等待：正在浏览器探测
@@ -485,7 +493,14 @@ async function containerAction(item, action) {
     } else {
       toast(`已${label} ${names.length > 1 ? `${names.length} 个容器` : names[0]}`);
     }
-    setTimeout(probeAll, 900); // 操作后立即按当前模式重探一轮并逐项展示最新状态
+    // 容器启停后是否自动重探：总开关开启且自动重探间隔 > 0 才探（间隔为 0 视作自动探测关闭）。
+    // 不探测时清掉上一轮结果回到灰点，避免留下与当前容器状态不符的旧红绿。
+    if (PREFS.probeOn && PREFS.autoSec > 0) {
+      setTimeout(probeAll, 900);
+    } else {
+      state.probes = {};
+      applyStatus();
+    }
   } catch (e) {
     toast(`${label}失败: ${e.message}`);
   }
@@ -542,21 +557,31 @@ function renderIdentity() {
 const setPop = el('setPop');
 
 // 回填弹层输入为指定值（打开时用当前偏好，恢复默认时用默认值）
-function fillSetPop(sec, on, cs) {
+function fillSetPop(probeOn, sec, on, cs) {
+  el('setProbeOn').checked = probeOn;
   el('setSec').value = sec;
   el('setOpen').checked = on;
   el('setClockSec').checked = cs;
 }
 
-function applyPrefs(sec, on, cs, msg) {
+function applyPrefs(probeOn, sec, on, cs, msg) {
+  const wasOn = PREFS.probeOn;
+  localStorage.setItem(PREFS_KEYS.probeOn, probeOn ? '1' : '0');
   localStorage.setItem(PREFS_KEYS.autoSec, String(sec));
   localStorage.setItem(PREFS_KEYS.onOpen, on ? '1' : '0');
   localStorage.setItem(PREFS_KEYS.clockSec, cs ? '1' : '0');
+  PREFS.probeOn = probeOn;
   PREFS.autoSec = sec;
   PREFS.onOpen = on;
   PREFS.clockSec = cs;
-  armAutoProbe(); // 间隔变化立即生效，无需重开页面
+  armAutoProbe(); // 总开关 / 间隔变化立即生效，无需重开页面
   tickClock();    // 时钟显示偏好立即生效
+  if (!PREFS.probeOn) {
+    state.probes = {}; // 探测器关闭：撤掉全部结果，状态点回到灰点
+    applyStatus();
+  } else if (!wasOn) {
+    probeAll(true);    // 由关转开：立即探测一轮，省得再手动点刷新
+  }
   toast(msg);
 }
 
@@ -564,21 +589,25 @@ function bindSetPop() {
   const btn = el('setBtn');
   const toggle = () => {
     const show = setPop.style.display === 'none';
-    if (show) fillSetPop(PREFS.autoSec, PREFS.onOpen, PREFS.clockSec);
+    if (show) fillSetPop(PREFS.probeOn, PREFS.autoSec, PREFS.onOpen, PREFS.clockSec);
     setPop.style.display = show ? 'block' : 'none';
   };
   btn.addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
   el('setSave').addEventListener('click', () => {
+    const probeOn = el('setProbeOn').checked;
     const sec = Math.max(0, Math.min(86400, Math.round(Number(el('setSec').value) || 0)));
     const on = el('setOpen').checked;
     const cs = el('setClockSec').checked;
     setPop.style.display = 'none';
-    const parts = [sec > 0 ? `自动重探每 ${sec} 秒` : '已关闭自动重探', on ? '开页即探' : '开页不探', cs ? '时间显示秒' : '时间隐藏秒'];
-    applyPrefs(sec, on, cs, `已保存：${parts.join('，')}`);
+    const parts = [probeOn ? '已启用探测' : '探测器已关闭',
+      sec > 0 ? `自动重探每 ${sec} 秒` : '已关闭自动重探',
+      on ? '开页即探' : '开页不探',
+      cs ? '时间显示秒' : '时间隐藏秒'];
+    applyPrefs(probeOn, sec, on, cs, `已保存：${parts.join('，')}`);
   });
   el('setReset').addEventListener('click', () => {
     setPop.style.display = 'none';
-    applyPrefs(0, false, false, '已恢复默认：关闭自动重探、打开页面不立即探测、时间不显示秒');
+    applyPrefs(false, 0, false, false, '已恢复默认：关闭探测器、关闭自动重探、打开页面不立即探测、时间不显示秒');
   });
   document.addEventListener('click', (e) => {
     if (!setPop.contains(e.target)) setPop.style.display = 'none';
@@ -608,14 +637,18 @@ async function boot() {
     return;
   }
   bindSetPop();
-  el('refreshBtn').addEventListener('click', () => probeAll(true));
+  el('refreshBtn').addEventListener('click', () => {
+    // 探测器总开关关闭时手动刷新也不探测，只提示去哪儿开启
+    if (!PREFS.probeOn) { toast('探测器已关闭：可在右上角「页面偏好 → 启用探测」开启'); return; }
+    probeAll(true);
+  });
   // 容器状态：首次拉取后每 10 秒刷新（仅做 dead 判定与右键菜单摘要）
   refreshContainers();
   setInterval(refreshContainers, 10000);
-  // 可达性（间隔与开关可在右上角「页面偏好」调整，存本机）：
-  // 默认两项均关闭（autoSec=0 且 onOpen=false）：页面打开不做任何自动探测，
-  // 仅手动刷新 / 容器启停时触发；开启任一偏好即按各自节奏自动探测
-  if (PREFS.onOpen) probeAll(true);
+  // 可达性（总开关与间隔均可在右上角「页面偏好」调整，存本机）：
+  // 默认探测器关闭（probeOn=false）：页面打开不做任何探测，状态点一律灰点；
+  // 开启探测器后，按「开页即探」「自动重探间隔」的节奏探测，手动刷新始终可用。
+  if (PREFS.onOpen && PREFS.probeOn) probeAll(true);
   armAutoProbe();
 }
 
