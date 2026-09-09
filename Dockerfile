@@ -1,5 +1,5 @@
-# 构建阶段：编译 Go 二进制（基础镜像走国内镜像源）
-FROM docker.m.daocloud.io/golang:1.24-alpine AS builder
+# 构建阶段：编译 Go 二进制（基础镜像统一走 Docker Hub 官方源，不使用第三方镜像源）
+FROM golang:1.24-alpine AS builder
 
 ENV GOPROXY=https://goproxy.cn,direct \
     CGO_ENABLED=0 \
