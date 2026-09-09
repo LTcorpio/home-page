@@ -316,8 +316,23 @@ window.addEventListener('scroll', () => {
 
 /* ------------------------------------------------------------ 可达性（浏览器直连） */
 
-// 取卡片离线原因（来自最近一次探测的 error），用于不可达提示与状态点悬停
+// 取卡片绑定容器中「未运行」的名字列表。
+// 容器缺失（不在容器表内）不计入：接口取失败时容器表为空，若计缺失会导致全页误判红。
+function downContainers(it) {
+  const down = [];
+  if (!it || !it.container_name) return down;
+  for (const n of splitList(it.container_name)) {
+    const c = state.containers[n];
+    if (c && c.state !== 'running') down.push(n);
+  }
+  return down;
+}
+
+// 取卡片离线原因，用于不可达提示与状态点悬停。
+// 顺序：容器未运行（与卡片置灰同源，最可靠）→ 浏览器探测的网络错误。
 function reachReason(id) {
+  const down = downContainers(itemById[id]);
+  if (down.length) return `：容器未运行（${down.join('、')}）`;
   const res = state.probes[id];
   return res && res.error ? `：${res.error}` : '';
 }
@@ -414,19 +429,20 @@ function applyStatus() {
     const addr = it.url;
     const isWeb = !!(addr && /^https?:\/\//i.test(addr));
 
-    // 绑定多容器：任一容器非 running 即视为服务不可用（容器缺失也算不可用）
-    let cDown = false;
-    if (it.container_name) {
-      for (const n of splitList(it.container_name)) {
-        const c = state.containers[n];
-        if (c && c.state !== 'running') { cDown = true; break; }
-      }
-    }
+    // 绑定多容器：任一容器非 running 即视为服务不可用（容器缺失不计，见 downContainers）
+    const downNames = downContainers(it);
+    const cDown = downNames.length > 0;
 
     dot.className = 'dot';
     dot.title = '';
     if (it.hidden) {
       dot.classList.add('idle');
+    } else if (cDown) {
+      // 容器运行状态优先于浏览器探测：服务停了但 nginx 仍会应答（维护页 / 502），
+      // 而 no-cors 探测读不到状态码、一律判绿，就会出现「绿点却点不开」的矛盾。
+      // 故容器未运行时直接判红，与卡片置灰、「当前不可达」提示保持同源。
+      dot.classList.add('offline');
+      dot.title = `离线：容器未运行（${downNames.join('、')}）`;
     } else if (res) {
       if (res.online) {
         dot.classList.add('online');
