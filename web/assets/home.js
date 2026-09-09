@@ -556,12 +556,20 @@ function renderIdentity() {
 
 const setPop = el('setPop');
 
+// 探测器总开关关闭时隐藏其子配置项（自动重探间隔 / 打开页面立即探测）：
+// 总开关关着时这两项不会有任何效果，显示出来只是噪音
+function syncProbeSubRows() {
+  const on = el('setProbeOn').checked;
+  document.querySelectorAll('.probe-sub').forEach((row) => { row.style.display = on ? '' : 'none'; });
+}
+
 // 回填弹层输入为指定值（打开时用当前偏好，恢复默认时用默认值）
 function fillSetPop(probeOn, sec, on, cs) {
   el('setProbeOn').checked = probeOn;
   el('setSec').value = sec;
   el('setOpen').checked = on;
   el('setClockSec').checked = cs;
+  syncProbeSubRows();
 }
 
 function applyPrefs(probeOn, sec, on, cs, msg) {
@@ -593,6 +601,7 @@ function bindSetPop() {
     setPop.style.display = show ? 'block' : 'none';
   };
   btn.addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
+  el('setProbeOn').addEventListener('change', syncProbeSubRows); // 切总开关即时显隐子项
   el('setSave').addEventListener('click', () => {
     const probeOn = el('setProbeOn').checked;
     const sec = Math.max(0, Math.min(86400, Math.round(Number(el('setSec').value) || 0)));
