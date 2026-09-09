@@ -138,6 +138,63 @@ func migrate() {
 			log.Printf("已删除废弃列 items.lan_url（地址切换功能已移除，仅保留 url）")
 		}
 	}
+	// 上次异常退出（SIGKILL/断电）会留下未折回主库的 -wal/-shm：
+	// SQLite 打开时已自动回放，这里再主动做一次 TRUNCATE 检查点收尾，
+	// 把残留数据真正落进主库并清空 WAL
+	if err := checkpointWAL(); err != nil {
+		log.Printf("启动期 WAL 检查点失败（稍后由周期任务重试）: %v", err)
+	}
+	go walCheckpointLoop()
+}
+
+// walStop 通知周期 WAL 检查点协程退出（closeStore 时 close）
+var walStop = make(chan struct{})
+
+// checkpointWAL TRUNCATE 级检查点：把 -wal 中已提交内容折回主库并截断 WAL。
+// 返回错误表示本次未完成（如被并发连接占用），可稍后重试。
+func checkpointWAL() error {
+	var busy, logFrames, ckptFrames int
+	err := db.QueryRow(`PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &logFrames, &ckptFrames)
+	if err != nil {
+		return err
+	}
+	if busy != 0 {
+		return fmt.Errorf("有 %d 个连接占用，检查点未完成", busy)
+	}
+	return nil
+}
+
+// walCheckpointLoop 每 5 分钟压缩一次 WAL：
+//   - 运行期数据定期落回主库，-wal 不无限增长（SQLite 默认 4MB 才自动检查点）
+//   - 万一再遇 SIGKILL/断电这类无法优雅退出的场景，残留 WAL 也极小、重启恢复更快
+func walCheckpointLoop() {
+	t := time.NewTicker(5 * time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			if err := checkpointWAL(); err != nil {
+				log.Printf("周期 WAL 检查点失败: %v", err)
+			}
+		case <-walStop:
+			return
+		}
+	}
+}
+
+// closeStore 优雅停库（配合 main 的 SIGTERM 处理）：
+// 先做最终 TRUNCATE 检查点，再关闭全部连接——最后一个连接干净关闭时，
+// SQLite 会顺手删除 -wal / -shm 临时文件，数据目录只剩主库 home-page.db
+func closeStore() {
+	close(walStop)
+	if err := checkpointWAL(); err != nil {
+		log.Printf("停机前 WAL 检查点失败: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		log.Printf("关闭数据库失败: %v", err)
+		return
+	}
+	log.Printf("数据库已优雅关闭，-wal/-shm 临时文件已清理")
 }
 
 func tableHasColumn(table, col string) bool {

@@ -48,13 +48,19 @@ Programs/home-page/
 └── build.sh       # 构建镜像
 ```
 
-运行时数据（由 compose 挂载）：
+运行时数据（由 compose 挂载，`./home-page` 相对 compose 目录）：
 
 ```
-Docker/DockerData/home-page/
+Docker/compose/lifestyle/home-page/
 ├── home-page.db   # 数据库
-└── icons/         # 上传与抓取的图标（含壁纸）
+├── icons/         # 上传与抓取的图标（含壁纸）
+└── (home-page.db-wal / -shm)   # SQLite WAL 临时文件：运行期存在，
+                                # docker stop 优雅退出时自动折回主库并删除
 ```
+
+程序对 SIGTERM（docker stop / compose down）做优雅停机：先停 HTTP 接收新请求，
+再执行 WAL 检查点并关闭数据库，`-wal/-shm` 临时文件随之清理，数据目录只剩主库。
+服务被强杀（SIGKILL/断电）时残留的 WAL 会在下次启动时自动回放并收尾，数据不丢。
 
 ## 部署
 

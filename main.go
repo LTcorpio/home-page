@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -10,10 +11,12 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -824,8 +827,32 @@ func main() {
 	mux.HandleFunc("GET /api/icons/proxy", handleIconProxy)
 
 	addr := ":" + envOr("PORT", "80")
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	// 优雅退出：docker stop / compose down 会先发 SIGTERM。若不做任何处理，
+	// 进程会当场消失，SQLite 连接来不及关闭，-wal/-shm 临时文件便残留在数据卷上。
+	// 收到信号后：停止接收新请求 → 等存量请求处理完 → 关库做 WAL 收尾。
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
 	log.Printf("home-page 启动于 %s（数据目录 %s）", addr, dataDir)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+
+	select {
+	case <-ctx.Done():
+		log.Printf("收到退出信号，正在优雅关闭…")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("HTTP 服务关闭超时，强制退出: %v", err)
+		}
+		closeStore()
+	case err := <-errCh:
 		log.Fatalf("服务退出: %v", err)
 	}
 }
