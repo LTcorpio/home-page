@@ -556,6 +556,11 @@ function renderIdentity() {
 
 const setPop = el('setPop');
 
+// 探测器总开关关闭时隐藏右上角刷新按钮：此时点了也不会探测，留着只会误导
+function syncRefreshBtn() {
+  el('refreshBtn').style.display = PREFS.probeOn ? '' : 'none';
+}
+
 // 探测器总开关关闭时隐藏其子配置项（自动重探间隔 / 打开页面立即探测）：
 // 总开关关着时这两项不会有任何效果，显示出来只是噪音
 function syncProbeSubRows() {
@@ -582,8 +587,9 @@ function applyPrefs(probeOn, sec, on, cs, msg) {
   PREFS.autoSec = sec;
   PREFS.onOpen = on;
   PREFS.clockSec = cs;
-  armAutoProbe(); // 总开关 / 间隔变化立即生效，无需重开页面
-  tickClock();    // 时钟显示偏好立即生效
+  armAutoProbe();   // 总开关 / 间隔变化立即生效，无需重开页面
+  syncRefreshBtn(); // 总开关关闭时一并收起刷新按钮
+  tickClock();      // 时钟显示偏好立即生效
   if (!PREFS.probeOn) {
     state.probes = {}; // 探测器关闭：撤掉全部结果，状态点回到灰点
     applyStatus();
@@ -646,8 +652,9 @@ async function boot() {
     return;
   }
   bindSetPop();
+  syncRefreshBtn(); // 开页即按探测器总开关决定刷新按钮是否显示
   el('refreshBtn').addEventListener('click', () => {
-    // 探测器总开关关闭时手动刷新也不探测，只提示去哪儿开启
+    // 总开关关闭时按钮已隐藏；此处兜底，避免异常路径下点了不探测
     if (!PREFS.probeOn) { toast('探测器已关闭：可在右上角「页面偏好 → 启用探测」开启'); return; }
     probeAll(true);
   });
