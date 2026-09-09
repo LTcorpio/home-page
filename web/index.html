@@ -29,10 +29,10 @@
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M2 14h4"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>
       </button>
       <div class="set-pop" id="setPop" style="display:none">
-        <div class="set-title">页面偏好</div>
-        <div class="set-desc">以下偏好保存在本机浏览器，仅对当前设备生效。</div>
+        <div class="set-title" title="偏好保存在本机浏览器，仅对当前设备生效">页面偏好</div>
         <div class="sec first">自动探测</div>
-        <div class="srow">
+        <!-- 说明文字统一走 title：鼠标悬浮该行查看，弹层内不再堆砌大段提示 -->
+        <div class="srow" title="探测器总开关。关闭（默认）时永不触发探测：开页、定时重探、容器启停、手动刷新都不探，所有状态点保持灰点；开启后下面两项才生效">
           <span class="lbl">启用探测</span>
           <div class="right">
             <label class="switch">
@@ -41,16 +41,14 @@
             </label>
           </div>
         </div>
-        <div class="hint">探测器总开关。关闭（默认）时永不触发探测：开页、定时重探、容器启停、手动刷新都不探，所有状态点保持灰点；开启后才按下面两项的节奏探测。</div>
-        <div class="srow">
+        <div class="srow probe-sub" title="页面可见时每隔该秒数自动探测一轮；0 = 关闭自动重探（此时容器启停也不自动探测，旧结果清空回灰点），仅手动刷新可探测">
           <span class="lbl">自动重探间隔</span>
           <div class="right">
             <input type="number" id="setSec" min="0" max="86400" step="5" />
             <span class="unit">秒</span>
           </div>
         </div>
-        <div class="hint">总开关开启时，页面可见则每隔该秒数自动探测一轮；设为 0（默认）关闭自动重探，此时容器启停也不再自动探测（旧结果清空回灰点），仅手动刷新可探测。</div>
-        <div class="srow">
+        <div class="srow probe-sub" title="每次打开首页先立即探测一轮；关闭时仅在自动重探周期（若已开启）或手动刷新时探测">
           <span class="lbl">打开页面立即探测</span>
           <div class="right">
             <label class="switch">
@@ -59,9 +57,8 @@
             </label>
           </div>
         </div>
-        <div class="hint">总开关开启时，每次打开首页先立即探测一轮；关闭（默认）时仅在自动重探周期（若已开启）或手动刷新时探测。</div>
         <div class="sec">时钟显示</div>
-        <div class="srow">
+        <div class="srow" title="时间显示到秒（HH:MM:SS）；关闭仅显示时:分，日期固定完整格式（如 2026-09-08 星期二）">
           <span class="lbl">显示秒</span>
           <div class="right">
             <label class="switch">
@@ -70,7 +67,6 @@
             </label>
           </div>
         </div>
-        <div class="hint">开启后时间显示到秒（HH:MM:SS），关闭仅显示时:分；日期固定为完整格式（如 2026-09-08 星期二）。</div>
         <div class="sfoot">
           <button class="btn" id="setReset">恢复默认</button>
           <div class="grow"></div>
