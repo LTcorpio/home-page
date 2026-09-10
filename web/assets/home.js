@@ -63,6 +63,23 @@ function escapeHTML(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/* ------------------------------------------------------------ 访问地址：域名 vs IP 直连 */
+
+// 规则：经域名访问首页（https://example.com，走 SSO）→ 用卡片主地址 url；
+// 经 IP 直连访问（http://127.0.0.1:8080，给配不了 example.com 私有 DNS 的
+// 局域网设备用）→ 若卡片配了局域网地址 lan_url 则改用它，这些服务无需 SSO 可直连。
+// lan_url 仅对绑定了容器的卡片生效（后端入库时已强制，未绑定容器一律置空）。
+const LAN_MODE = (() => {
+  const h = String(location.hostname || '').replace(/^\[|\]$/g, '');
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(':'); // IPv4 / IPv6 字面量即视为非域名访问
+})();
+
+// 卡片当前生效的访问地址：IP 直连模式下优先用局域网地址，其余情况用主地址
+function effURL(it) {
+  if (!it) return '';
+  return (LAN_MODE && it.lan_url) ? it.lan_url : (it.url || '');
+}
+
 /* ------------------------------------------------------------ 渲染 */
 
 function renderBoard() {
@@ -98,7 +115,7 @@ function renderBoard() {
 }
 
 function cardHTML(item) {
-  const addr = item.url || '';
+  const addr = effURL(item); // 悬停提示展示的即当前实际生效的地址（域名 / IP 直连两种模式不同）
   const cls = ['card', item.hidden ? 'disabled' : ''].join(' ');
   return `
     <div class="${cls}" data-id="${item.id}" data-container="${escapeHTML(item.container_name || '')}" data-name="${escapeHTML(item.name || '')}" title="${item.hidden ? '已禁用' : escapeHTML(addr)}">
@@ -127,7 +144,7 @@ function bindCards() {
       }
       if (it.hidden) { toast(`「${it.name}」已禁用`); return; }
       if (card.classList.contains('dead')) { toast(`「${it.name}」当前不可达${reachReason(it.id)}`); return; }
-      const url = it.url;
+      const url = effURL(it); // 域名访问用 SSO 地址，IP 直连访问用卡片配置的局域网地址
       if (url) window.open(url, '_blank');
     });
     card.addEventListener('contextmenu', (e) => {
@@ -205,6 +222,8 @@ function iconHTML(item) {
   if (item.icon_type === 'upload' && item.icon_value) {
     src = '/icons/' + encodeURIComponent(item.icon_value);
   } else if (item.icon_type === 'auto' && item.url) {
+    // 图标抓取由服务端容器发起，必须用主地址 url：
+    // 容器不在局域网白名单（局域网网段）内，改走 lan_url 会被 nginx 403。
     src = '/api/icons/proxy?url=' + encodeURIComponent(item.url);
   }
   if (!src) return `<span class="letter text-shadow">${escapeHTML(text)}</span>`;
@@ -277,7 +296,7 @@ function showCtxMenu(x, y, card) {
         toast(`「${it.name}」当前不可达${reachReason(it.id)}`);
         return;
       }
-      const url = it.url;
+      const url = effURL(it); // 与左键点击一致：IP 直连模式下打开局域网地址
       if (url) window.open(url, '_blank');
       return;
     }
@@ -343,14 +362,16 @@ function reachReason(id) {
   return res && res.error ? `：${res.error}` : '';
 }
 
-// 单张卡片：用卡片地址（url）让浏览器直接发请求判定可达性。
+// 单张卡片：用「当前生效的地址」让浏览器直接发请求判定可达性。
 // 判定原则：http/https 用 fetch(no-cors)——网络可达即在线（拿不到状态码也不关心 3xx/4xx/5xx），
 // 网络层不通（断网/拒连/域名解析失败/证书不受信任/超时）即离线。
+// 探测目标与点击跳转目标保持一致：域名访问探 url，IP 直连访问探 lan_url——
+// 局域网设备往往解析不了 example.com，用 url 探测会把本可直连的服务误判成红点。
 // 注意：浏览器与服务器容器不同，直接处在真实主机网络栈里，Wi-Fi 断了就必然判红。
 const PROBE_TIMEOUT = 4000; // 单次判定超时
 
 async function probeCard(it) {
-  const addr = it.url;
+  const addr = effURL(it);
   if (!addr) return null;
   if (!/^https?:\/\//i.test(addr)) return null; // 非 Web 地址无法在浏览器判定，跳过（状态点不渲染）
   const ctrl = new AbortController();
@@ -389,7 +410,7 @@ async function probeAll(manual = false) {
   const targets = [];
   (state.groups || []).forEach((g) => (g.items || []).forEach((it) => {
     if (it.hidden || !it.probe) return;
-    const addr = it.url;
+    const addr = effURL(it);
     if (addr && /^https?:\/\//i.test(addr)) targets.push(it); // 仅收集可浏览器判定的 http/https 卡片
   }));
   await Promise.allSettled(targets.map(async (it) => {
@@ -433,7 +454,7 @@ function applyStatus() {
     if (!it) return;
     const res = state.probes[id];
     const dot = card.querySelector('[data-dot]');
-    const addr = it.url;
+    const addr = effURL(it); // 与探测目标同源：判断「能否在浏览器里判定」用当前生效地址
     const isWeb = !!(addr && /^https?:\/\//i.test(addr));
 
     // 绑定多容器：任一容器非 running 即视为服务不可用（容器缺失不计，见 downContainers）

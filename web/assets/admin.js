@@ -143,6 +143,7 @@ function renderItems() {
       </td>
       <td class="cell-addr">
         <div class="u" title="${escapeHTML(it.url || '')}">${escapeHTML(it.url || '—')}</div>
+        ${it.lan_url ? `<div class="lan" title="${escapeHTML(it.lan_url)}">局域网 ${escapeHTML(it.lan_url)}</div>` : ''}
       </td>
       <td class="no-wrap">${escapeHTML(groupName(it.group_id))}</td>
       <td class="no-wrap" style="max-width:150px">${it.container_name ? `<span class="mono" title="${escapeHTML(it.container_name)}">${escapeHTML(it.container_name)}</span>` : '<span class="sub">—</span>'}</td>
@@ -222,6 +223,8 @@ function openModal(id) {
   el('fIconType').value = editing ? editing.icon_type || 'auto' : 'auto';
   el('fIconText').value = editing && editing.icon_type === 'text' ? editing.icon_value : '';
   el('fContainer').value = editing ? editing.container_name : '';
+  el('fLanUrl').value = editing ? (editing.lan_url || '') : '';
+  syncLanRow();
   el('fProbe').checked = !editing || !!editing.probe;
   el('fAcl').value = editing ? editing.acl : '';
   el('fMemo').value = editing ? editing.memo || '' : '';
@@ -262,6 +265,14 @@ function syncIconRows() {
   updateIconPreview();
 }
 
+// 局域网地址只对「绑定了容器」的卡片开放：未填容器时隐藏该行并清空输入
+// （与后端 sanitizeItem 的规则一致，避免出现「填了保存后又被清掉」的困惑）
+function syncLanRow() {
+  const on = !!el('fContainer').value.trim();
+  el('lanRow').style.display = on ? '' : 'none';
+  if (!on) el('fLanUrl').value = '';
+}
+
 async function saveModal() {
   const iconType = el('fIconType').value;
   let iconTypeFinal = iconType;
@@ -282,6 +293,7 @@ async function saveModal() {
     icon_type: iconTypeFinal,
     icon_value: iconValue,
     container_name: el('fContainer').value.trim(),
+    lan_url: el('fContainer').value.trim() ? el('fLanUrl').value.trim() : '',
     probe: el('fProbe').checked,
     hidden: !el('fStatus').checked,
     acl: el('fAcl').value.trim(),
@@ -375,6 +387,7 @@ function bind() {
   el('modalCancel').addEventListener('click', closeModal);
   el('modalSave').addEventListener('click', saveModal);
   el('fIconType').addEventListener('change', syncIconRows);
+  el('fContainer').addEventListener('input', syncLanRow); // 容器名一改，局域网地址行随之显隐
   el('fName').addEventListener('input', updateIconPreview);
   el('fIconText').addEventListener('input', updateIconPreview);
   // 弹窗仅通过「保存 / 取消」关闭，点击遮罩不会关闭，避免误触丢失已编辑内容

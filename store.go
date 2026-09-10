@@ -44,6 +44,7 @@ type Item struct {
 	IconType      string `json:"icon_type"`      // auto | upload | text
 	IconValue     string `json:"icon_value"`     // upload=文件名, text=文字, auto=留空
 	ContainerName string `json:"container_name"` // 绑定的 Docker 容器名（白名单）
+	LanURL        string `json:"lan_url"`        // 局域网直连地址（IP:端口）；仅绑定容器时可用，经 IP 访问首页时优先使用
 	Probe         bool   `json:"probe"`          // 是否参与在线状态探测
 	Sort          int    `json:"sort"`
 	Hidden        bool   `json:"hidden"`         // 禁用：不出现在首页且不参与探测
@@ -99,6 +100,7 @@ func migrate() {
 			icon_type      TEXT NOT NULL DEFAULT 'auto',
 			icon_value     TEXT NOT NULL DEFAULT '',
 			container_name TEXT NOT NULL DEFAULT '',
+			lan_url        TEXT NOT NULL DEFAULT '',
 			probe          INTEGER NOT NULL DEFAULT 1,
 			sort           INTEGER NOT NULL DEFAULT 0,
 			hidden         INTEGER NOT NULL DEFAULT 0,
@@ -121,6 +123,7 @@ func migrate() {
 	// 兼容旧库：补充后加的列
 	for _, col := range []struct{ name, ddl string }{
 		{"memo", "ALTER TABLE items ADD COLUMN memo TEXT NOT NULL DEFAULT ''"},
+		{"lan_url", "ALTER TABLE items ADD COLUMN lan_url TEXT NOT NULL DEFAULT ''"},
 	} {
 		if !tableHasColumn("items", col.name) {
 			if _, err := db.Exec(col.ddl); err != nil {
@@ -130,14 +133,9 @@ func migrate() {
 			}
 		}
 	}
-	// 移除已废弃的「本机地址」列（内外网地址切换已删除，只保留 url）
-	if tableHasColumn("items", "lan_url") {
-		if _, err := db.Exec(`ALTER TABLE items DROP COLUMN lan_url`); err != nil {
-			log.Printf("删除 items.lan_url 列失败: %v", err)
-		} else {
-			log.Printf("已删除废弃列 items.lan_url（地址切换功能已移除，仅保留 url）")
-		}
-	}
+	// 注意：lan_url 曾在「内外网地址切换」下线时被 DROP，现以新语义回归——
+	// 不再做本机/局域网/自动三态切换，而是「域名访问用 url，IP 直连访问用 lan_url」，
+	// 且仅对绑定了容器的卡片开放。切勿再恢复该列的 DROP 迁移。
 	// 上次异常退出（SIGKILL/断电）会留下未折回主库的 -wal/-shm：
 	// SQLite 打开时已自动回放，这里再主动做一次 TRUNCATE 检查点收尾，
 	// 把残留数据真正落进主库并清空 WAL
@@ -341,13 +339,13 @@ func reorderGroups(ids []int64) error {
 // --- 卡片 ---------------------------------------------------------------
 
 const itemCols = `id, group_id, name, url, description, icon_type, icon_value,
-	container_name, probe, sort, hidden, acl, memo, created_at, updated_at`
+	container_name, lan_url, probe, sort, hidden, acl, memo, created_at, updated_at`
 
 func scanItem(rows *sql.Rows) (Item, error) {
 	var it Item
 	var probe, hidden int
 	err := rows.Scan(&it.ID, &it.GroupID, &it.Name, &it.URL, &it.Description,
-		&it.IconType, &it.IconValue, &it.ContainerName, &probe, &it.Sort, &hidden,
+		&it.IconType, &it.IconValue, &it.ContainerName, &it.LanURL, &probe, &it.Sort, &hidden,
 		&it.ACL, &it.Memo, &it.CreatedAt, &it.UpdatedAt)
 	it.Probe = probe == 1
 	it.Hidden = hidden == 1
@@ -390,10 +388,10 @@ func getItem(id int64) (*Item, error) {
 
 func createItem(it Item) (int64, error) {
 	res, err := db.Exec(`INSERT INTO items
-		(group_id, name, url, description, icon_type, icon_value, container_name, probe, sort, hidden, acl, memo, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(group_id, name, url, description, icon_type, icon_value, container_name, lan_url, probe, sort, hidden, acl, memo, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		it.GroupID, it.Name, it.URL, it.Description, it.IconType, it.IconValue,
-		it.ContainerName, boolInt(it.Probe), it.Sort, boolInt(it.Hidden), it.ACL, it.Memo, nowStr(), nowStr())
+		it.ContainerName, it.LanURL, boolInt(it.Probe), it.Sort, boolInt(it.Hidden), it.ACL, it.Memo, nowStr(), nowStr())
 	if err != nil {
 		return 0, err
 	}
@@ -402,10 +400,10 @@ func createItem(it Item) (int64, error) {
 
 func updateItem(it Item) error {
 	_, err := db.Exec(`UPDATE items SET group_id = ?, name = ?, url = ?, description = ?,
-		icon_type = ?, icon_value = ?, container_name = ?, probe = ?, sort = ?, hidden = ?, acl = ?, memo = ?, updated_at = ?
+		icon_type = ?, icon_value = ?, container_name = ?, lan_url = ?, probe = ?, sort = ?, hidden = ?, acl = ?, memo = ?, updated_at = ?
 		WHERE id = ?`,
 		it.GroupID, it.Name, it.URL, it.Description, it.IconType, it.IconValue,
-		it.ContainerName, boolInt(it.Probe), it.Sort, boolInt(it.Hidden), it.ACL, it.Memo, nowStr(), it.ID)
+		it.ContainerName, it.LanURL, boolInt(it.Probe), it.Sort, boolInt(it.Hidden), it.ACL, it.Memo, nowStr(), it.ID)
 	return err
 }
 
