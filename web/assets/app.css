@@ -694,6 +694,17 @@ textarea { min-height: 140px; font-family: ui-monospace, SFMono-Regular, Menlo, 
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
 }
+/* 局域网直连地址：地址列第二行，弱化显示 */
+.cell-addr .lan {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
 
 .table td .btn.mini + .btn.mini { margin-left: 4px; }
 

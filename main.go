@@ -535,6 +535,30 @@ func handleGroupSort(w http.ResponseWriter, r *http.Request) {
 
 // ---------------------------------------------------------------- 卡片 API
 
+// normalizeLanURL 规整局域网地址：允许只写 192.168.1.100:2283（自动补 http://），
+// 去掉首尾空白与结尾斜杠，保证是可直接打开 / 探测的 URL。
+func normalizeLanURL(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	if !strings.Contains(s, "://") {
+		s = "http://" + s
+	}
+	return strings.TrimRight(s, "/")
+}
+
+// sanitizeItem 卡片入库前的规整：
+//   - 局域网地址只对「绑定了容器」的卡片开放：未绑定时一律清空，避免留下永远不会生效的配置
+//   - 已绑定时补全 scheme（http://ip:port）
+func sanitizeItem(it *Item) {
+	if strings.TrimSpace(it.ContainerName) == "" {
+		it.LanURL = ""
+		return
+	}
+	it.LanURL = normalizeLanURL(it.LanURL)
+}
+
 func handleItems(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -560,6 +584,7 @@ func handleItems(w http.ResponseWriter, r *http.Request) {
 		if it.IconType == "upload" && it.IconValue == "" {
 			it.IconType = "auto"
 		}
+		sanitizeItem(&it)
 		items, _ := listItems()
 		for _, x := range items {
 			if x.GroupID == it.GroupID && x.Sort >= it.Sort {
@@ -614,6 +639,7 @@ func handleItemByID(w http.ResponseWriter, r *http.Request) {
 		if it.IconType == "" {
 			it.IconType = "auto"
 		}
+		sanitizeItem(&it)
 		if err := updateItem(it); err != nil {
 			writeErr(w, 500, err.Error())
 			return

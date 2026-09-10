@@ -159,6 +159,11 @@
           <option value="text">文字图标</option>
         </select></div>
         <div class="field"><label>绑定容器</label><input type="text" id="fContainer" placeholder="容器名；一个服务多个容器用英文逗号分隔（如 immich_server,immich_machine_learning）" /></div>
+        <div class="field full" id="lanRow" style="display:none">
+          <label>局域网地址（IP:端口，供无需 SSO 的服务直连）</label>
+          <input type="text" id="fLanUrl" placeholder="如 192.168.1.100:2283 或 http://192.168.1.100:2283" />
+          <div class="sub">仅绑定容器后可填。填写后：经域名访问首页（https://home.lan）用上面的「地址」；经 IP 访问首页（如 http://192.168.1.100:8080）时改用此地址，供局域网内其他成员直连该服务（不经过 SSO）。</div>
+        </div>
         <div class="field" id="iconTextRow" style="display:none"><label>图标文字</label><input type="text" id="fIconText" placeholder="如：状态 / RIDE" /></div>
         <div class="field" id="uploadRow" style="display:none">
           <label>图标文件</label>
