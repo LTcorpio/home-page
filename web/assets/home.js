@@ -14,10 +14,10 @@ const el = (id) => document.getElementById(id);
 const toastBox = el('toast');
 
 /* ------------------------------------------------ 前端偏好（localStorage，仅当前浏览器生效） */
-// 自动探测偏好：原为后端全局配置，随后端探测一起移除；
-// 现探测在浏览器内进行，自动重探节奏与时钟显示偏好改为按设备保存在本机，可随时在右上角「页面偏好」调整。
-// probeOn = 探测器总开关：关闭（默认）时永不触发任何探测（开页 / 自动重探 / 容器启停 / 手动刷新），
-// 所有状态点保持灰点。开启后才按 autoSec / onOpen 的节奏探测。
+// 自动探测偏好：探测在浏览器内进行，自动重探节奏与时钟显示偏好按设备保存在本机，
+// 可随时在右上角「页面偏好」调整。
+// probeOn = 本机探测器开关（默认关闭）：关闭时本机永不触发任何探测（开页 / 自动重探 / 容器启停 / 手动刷新），
+// 所有状态点保持灰点。开启后还需站点总闸（后台「可达性检测」，默认关闭）放行才真正探测。
 const PREFS = { probeOn: false, autoSec: 0, onOpen: false, clockSec: false }; // 默认：探测器关闭 + 关闭自动重探 + 打开页面不立即探测 + 时钟不显示秒
 const PREFS_KEYS = { probeOn: 'hp:probeOn', autoSec: 'hp:autoSec', onOpen: 'hp:onOpen', clockSec: 'hp:clockSec' };
 
@@ -325,6 +325,58 @@ function closeMemoPop() { memoMask.style.display = 'none'; }
 el('memoClose').addEventListener('click', closeMemoPop);
 memoMask.addEventListener('click', (e) => { if (e.target === memoMask) closeMemoPop(); });
 
+/* ------------------------------------------------------------ 操作确认浮窗（替代浏览器原生 confirm） */
+
+const popConfirm = el('popConfirm');
+
+// 把浮窗定位到卡片上方（空间不足则落到卡片下方），水平对齐卡片中心并夹在视口内，
+// 让确认按钮紧邻卡片，免去原生弹窗那种「跑到浏览器顶部去点」的鼠标长距离移动
+function placePopAbove(pop, anchor) {
+  pop.style.transform = '';
+  if (!anchor) {
+    pop.style.left = '50%';
+    pop.style.top = '120px';
+    pop.style.transform = 'translateX(-50%)';
+    return;
+  }
+  const a = anchor.getBoundingClientRect();
+  const r = pop.getBoundingClientRect();
+  let top = a.top - r.height - 10;
+  if (top < 8) top = Math.min(a.bottom + 10, window.innerHeight - r.height - 8);
+  const left = Math.max(8, Math.min(a.left + a.width / 2 - r.width / 2, window.innerWidth - r.width - 8));
+  pop.style.left = left + 'px';
+  pop.style.top = Math.max(8, top) + 'px';
+}
+
+// askConfirm 在锚点卡片上方弹出确认浮窗，返回 Promise<boolean>
+function askConfirm(message, anchor, okLabel) {
+  return new Promise((resolve) => {
+    el('pcMsg').textContent = message;
+    el('pcOk').textContent = okLabel || '确认';
+    popConfirm.style.display = 'block';
+    placePopAbove(popConfirm, anchor);
+    let closed = false;
+    const finish = (v) => {
+      if (closed) return;
+      closed = true;
+      popConfirm.style.display = 'none';
+      el('pcOk').removeEventListener('click', onOk);
+      el('pcCancel').removeEventListener('click', onCancel);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
+      resolve(v);
+    };
+    const onOk = () => finish(true);
+    const onCancel = () => finish(false);
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    const onScroll = () => finish(false);
+    el('pcOk').addEventListener('click', onOk);
+    el('pcCancel').addEventListener('click', onCancel);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, true);
+  });
+}
+
 let ctxOpenedAt = 0; // 菜单打开时间，用于跳过“打开瞬间浏览器补发的滚动事件”
 
 function hideCtxMenu() { ctx.style.display = 'none'; }
@@ -338,6 +390,28 @@ window.addEventListener('scroll', () => {
 }, true);
 
 /* ------------------------------------------------------------ 可达性（浏览器直连） */
+
+// 分组是否放行探测：站点总闸关闭时一律不探测，分组配置不生效；
+// 总闸开启后，分组显式「关闭」可让该分组单独豁免，其余（跟随全局 / 开启）都跟随总闸放行
+function groupAllowsProbe(it) {
+  if (state.settings.probe_enabled !== '1') return false; // 总闸关 = 一律不探
+  const g = (state.groups || []).find((x) => x.id === it.group_id);
+  return !(g && g.probe === 'off');
+}
+
+// 单张卡片是否参与探测，三级都要放行：
+//   ① 本机总开关（右上角「页面偏好 → 启用探测」，仅当前设备）
+//   ② 站点总闸「可达性检测」（后台站点设置，默认关闭）——关闭时一律不探测，分组配置也不生效
+//   ③ 卡片自身的「状态探测」开关；总闸开启后，还要求所在分组未设为「关闭」
+// 任一级不放行时该卡片不探测、状态点保持灰点。未分组卡片只看总闸与卡片开关。
+function probeAllowed(it) {
+  return PREFS.probeOn && !!it && !it.hidden && !!it.probe && groupAllowsProbe(it);
+}
+
+// 是否存在可探测的卡片：决定右上角刷新按钮是否显示
+function anyProbeAllowed() {
+  return (state.groups || []).some((g) => (g.items || []).some((it) => probeAllowed(it)));
+}
 
 // 取卡片绑定容器中「未运行」的名字列表。
 // 容器缺失（不在容器表内）不计入：接口取失败时容器表为空，若计缺失会导致全页误判红。
@@ -409,7 +483,7 @@ async function probeAll(manual = false) {
   applyStatus();
   const targets = [];
   (state.groups || []).forEach((g) => (g.items || []).forEach((it) => {
-    if (it.hidden || !it.probe) return;
+    if (!probeAllowed(it)) return; // 本机开关 / 站点总闸 / 分组配置 / 卡片开关，任一级关闭都不探
     const addr = effURL(it);
     if (addr && /^https?:\/\//i.test(addr)) targets.push(it); // 仅收集可浏览器判定的 http/https 卡片
   }));
@@ -481,9 +555,9 @@ function applyStatus() {
         // 悬停状态点可看到离线原因（仅管理员，如断网/证书不受信任等）
         dot.title = state.features.admin && res.error ? `离线：${res.error}` : '离线';
       }
-    } else if (it.probe && state.probing && isWeb) {
+    } else if (probeAllowed(it) && state.probing && isWeb) {
       dot.classList.add('pending'); // 呼吸等待：正在浏览器探测
-    } else if (it.probe && !isWeb && addr) {
+    } else if (probeAllowed(it) && !isWeb && addr) {
       dot.classList.add('idle');
       dot.title = '非网页地址，浏览器无法判定可达性';
     } else {
@@ -504,7 +578,12 @@ async function containerAction(item, action) {
   const names = splitList(item.container_name);
   const label = { start: '启动', stop: '停止', restart: '重启' }[action] || action;
   const target = names.length > 1 ? `${item.name}（${names.length} 个容器）` : names[0];
-  if (action !== 'start' && !confirm(`确认${label}「${target}」？`)) return;
+  // 停止 / 重启为破坏性操作，先确认；确认浮窗贴在卡片上方，点完不必把鼠标挪到浏览器顶部
+  if (action !== 'start') {
+    const card = document.querySelector(`.card[data-id="${item.id}"]`);
+    const ok = await askConfirm(`确认${label}「${target}」？`, card, `确认${label}`);
+    if (!ok) return;
+  }
   toast(`正在${label} ${names.length > 1 ? item.name : names[0]}…`);
   try {
     const data = await api(`/api/items/${item.id}/containers/${action}`, { method: 'POST' });
@@ -577,9 +656,10 @@ function renderIdentity() {
 
 const setPop = el('setPop');
 
-// 探测器总开关关闭时隐藏右上角刷新按钮：此时点了也不会探测，留着只会误导
+// 本机总开关关闭、或站点总闸与所有分组都不允许探测时隐藏右上角刷新按钮：
+// 此时点了也不会探测，留着只会误导
 function syncRefreshBtn() {
-  el('refreshBtn').style.display = PREFS.probeOn ? '' : 'none';
+  el('refreshBtn').style.display = (PREFS.probeOn && anyProbeAllowed()) ? '' : 'none';
 }
 
 // 探测器总开关关闭时隐藏其子配置项（自动重探间隔 / 打开页面立即探测）：
@@ -675,17 +755,18 @@ async function boot() {
   bindSetPop();
   syncRefreshBtn(); // 开页即按探测器总开关决定刷新按钮是否显示
   el('refreshBtn').addEventListener('click', () => {
-    // 总开关关闭时按钮已隐藏；此处兜底，避免异常路径下点了不探测
-    if (!PREFS.probeOn) { toast('探测器已关闭：可在右上角「页面偏好 → 启用探测」开启'); return; }
+    // 两种总开关任一关闭时按钮已隐藏；此处兜底，避免异常路径下点了不探测
+    if (!PREFS.probeOn) { toast('本机探测已关闭：可在右上角「页面偏好 → 启用探测」开启'); return; }
+    if (!anyProbeAllowed()) { toast('可达性检测未启用：请在后台「站点设置 → 可达性检测」开启'); return; }
     probeAll(true);
   });
   // 容器状态：首次拉取后每 10 秒刷新（仅做 dead 判定与右键菜单摘要）
   refreshContainers();
   setInterval(refreshContainers, 10000);
-  // 可达性（总开关与间隔均可在右上角「页面偏好」调整，存本机）：
-  // 默认探测器关闭（probeOn=false）：页面打开不做任何探测，状态点一律灰点；
-  // 开启探测器后，按「开页即探」「自动重探间隔」的节奏探测，手动刷新始终可用。
-  if (PREFS.onOpen && PREFS.probeOn) probeAll(true);
+  // 可达性（本机开关与节奏在右上角「页面偏好」调整，站点总闸与分组配置在后台站点设置）：
+  // 默认三级都未开启：页面打开不做任何探测，状态点一律灰点；
+  // 三级都放行后，按「开页即探」「自动重探间隔」的节奏探测，手动刷新始终可用。
+  if (PREFS.onOpen && anyProbeAllowed()) probeAll(true);
   armAutoProbe();
 }
 

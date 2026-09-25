@@ -99,6 +99,11 @@
             <h3>检测与控制</h3>
             <div class="form-grid">
               <div class="field">
+                <span class="lbl">可达性检测</span>
+                <label class="switch" title="开启 / 关闭（站点总闸）"><input type="checkbox" id="setProbe" /><span class="track"></span></label>
+                <div class="sub">站点总闸，默认关闭：关闭时一律不做可达性检测（分组配置也不生效），首页卡片右上角状态点恒为灰点。部分 https 链接（自签证书 / 仅内网可达）会被浏览器判为不可达但实际可以访问，局域网环境下建议保持关闭。开启后，可再对单个分组设为「关闭」来豁免该分组。</div>
+              </div>
+              <div class="field">
                 <span class="lbl">Docker 启停控制</span>
                 <label class="switch" title="启用 / 停用"><input type="checkbox" id="setDocker" /><span class="track"></span></label>
                 <div class="sub">开启：卡片绑定容器后，右键卡片即可启停。</div>
@@ -187,6 +192,16 @@
         <button class="btn" id="modalCancel">取消</button>
         <button class="btn primary" id="modalSave">保存</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 页面内确认 / 输入浮窗（替代浏览器原生 confirm / prompt，定位在对应行上方） -->
+  <div class="pop-confirm" id="popConfirm" style="display:none">
+    <div class="pc-msg" id="pcMsg"></div>
+    <input type="text" id="pcInput" style="display:none" />
+    <div class="pc-foot">
+      <button class="btn mini" id="pcCancel">取消</button>
+      <button class="btn mini primary" id="pcOk">确定</button>
     </div>
   </div>
 

@@ -71,6 +71,18 @@ func splitContainers(raw string) []string {
 	return out
 }
 
+// normalizeGroupProbe 规整分组可达性检测配置：只接受 on / off，
+// 其余（含空、未知值）一律落回 ""（跟随站点总闸），避免脏值让前端判定分支失效
+func normalizeGroupProbe(v string) string {
+	switch strings.TrimSpace(v) {
+	case "on":
+		return "on"
+	case "off":
+		return "off"
+	}
+	return ""
+}
+
 // ---------------------------------------------------------------- 身份（SSO / Authelia）
 
 // identity 经 SSO 认证后的用户身份，取自 nginx 反代注入的可信头
@@ -476,6 +488,7 @@ func handleGroups(w http.ResponseWriter, r *http.Request) {
 		}
 		groups, _ := listGroups()
 		g.Sort = len(groups)
+		g.Probe = normalizeGroupProbe(g.Probe)
 		id, err := createGroup(g)
 		if err != nil {
 			writeErr(w, 500, err.Error())
@@ -504,6 +517,7 @@ func handleGroupByID(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, "分组名不能为空")
 			return
 		}
+		g.Probe = normalizeGroupProbe(g.Probe)
 		if err := updateGroup(g); err != nil {
 			writeErr(w, 500, err.Error())
 			return
