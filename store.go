@@ -32,10 +32,10 @@ type Group struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
 	Sort int    `json:"sort"`
-	// Probe 该分组卡片的可达性检测配置：
-	//   ""    跟随总闸（站点设置 probe_enabled）
-	//   "on"  开启（总闸关闭时仍不探测，总闸开启后与该分组跟随总闸等价）
-	//   "off" 关闭（总闸开启后让该分组不参与探测）
+	// Probe 该分组的卡片是否参与可达性检测（仅在站点总闸 probe_enabled 开启时才有意义）：
+	//   ""    未配置 / 历史数据，按"on"处理
+	//   "on"  开启（参与探测）
+	//   "off" 关闭（该分组整体不参与探测）
 	Probe string `json:"probe"`
 }
 

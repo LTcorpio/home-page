@@ -72,7 +72,7 @@ func splitContainers(raw string) []string {
 }
 
 // normalizeGroupProbe 规整分组可达性检测配置：只接受 on / off，
-// 其余（含空、未知值）一律落回 ""（跟随站点总闸），避免脏值让前端判定分支失效
+// 其余（含空、未知值）一律落回 ""，前端按「未配置 = 开启」处理
 func normalizeGroupProbe(v string) string {
 	switch strings.TrimSpace(v) {
 	case "on":

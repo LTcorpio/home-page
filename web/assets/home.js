@@ -392,7 +392,8 @@ window.addEventListener('scroll', () => {
 /* ------------------------------------------------------------ 可达性（浏览器直连） */
 
 // 分组是否放行探测：站点总闸关闭时一律不探测，分组配置不生效；
-// 总闸开启后，分组显式「关闭」可让该分组单独豁免，其余（跟随全局 / 开启）都跟随总闸放行
+// 总闸开启后，分组可选「开启 / 关闭」，选「关闭」让该分组整体不参与探测
+// （旧数据里的空值按「开启」处理，避免历史分组被误停）
 function groupAllowsProbe(it) {
   if (state.settings.probe_enabled !== '1') return false; // 总闸关 = 一律不探
   const g = (state.groups || []).find((x) => x.id === it.group_id);
