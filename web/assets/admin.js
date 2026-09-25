@@ -148,16 +148,19 @@ function renderGroups() {
   box.innerHTML = `<h3>分组列表（${state.groups.length}）</h3>` + state.groups.map((g, i) => {
     const total = state.items.filter((it) => it.group_id === g.id).length;
     const enabled = state.items.filter((it) => it.group_id === g.id && !it.hidden).length;
+    // 分组探测下拉只在站点总闸开启时显示：总闸关闭时一律不探测，分组怎么配都不会生效
+    const probeSel = state.settings.probe_enabled === '1'
+      ? `<select class="probe-sel" data-probe="${g.id}" title="本分组的卡片是否参与可达性检测">
+        <option value="on"${g.probe === 'off' ? '' : ' selected'}>探测：开启</option>
+        <option value="off"${g.probe === 'off' ? ' selected' : ''}>探测：关闭</option>
+      </select>`
+      : '';
     return `<div class="row">
       <div class="grow">
         <div style="font-weight:600">${escapeHTML(g.name)} <span class="badge ${enabled ? 'on' : 'off'}">${enabled} 启用</span></div>
         <div class="sub">共 ${total} 张卡片</div>
       </div>
-      <select class="probe-sel" data-probe="${g.id}" title="该分组卡片的可达性检测：站点总闸关闭时一律不探测，此配置不生效；总闸开启后，选「关闭」可让本分组不参与探测">
-        <option value=""${g.probe ? '' : ' selected'}>探测：跟随总闸</option>
-        <option value="on"${g.probe === 'on' ? ' selected' : ''}>探测：开启</option>
-        <option value="off"${g.probe === 'off' ? ' selected' : ''}>探测：关闭</option>
-      </select>
+      ${probeSel}
       <button class="btn mini" data-act="up" data-i="${i}" ${i === 0 ? 'disabled' : ''}>上移</button>
       <button class="btn mini" data-act="down" data-i="${i}" ${i === state.groups.length - 1 ? 'disabled' : ''}>下移</button>
       <button class="btn mini" data-act="rename" data-i="${i}">重命名</button>
