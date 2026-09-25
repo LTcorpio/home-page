@@ -74,6 +74,7 @@ function askPop(opts) {
       el('pcOk').removeEventListener('click', onOk);
       el('pcCancel').removeEventListener('click', onCancel);
       input.removeEventListener('keydown', onInputKey);
+      document.removeEventListener('click', onOutside);
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', onScroll, true);
       resolve(v);
@@ -86,11 +87,15 @@ function askPop(opts) {
     };
     const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
     const onScroll = () => finish(withInput ? null : false);
+    // 点浮窗以外任意位置即关闭（等同取消）。必须延到本轮事件结束后再挂监听，
+    // 否则「打开浮窗的那次点击」会立刻冒泡到这里把浮窗关掉
+    const onOutside = (e) => { if (!popConfirm.contains(e.target)) onCancel(); };
     el('pcOk').addEventListener('click', onOk);
     el('pcCancel').addEventListener('click', onCancel);
     input.addEventListener('keydown', onInputKey);
     document.addEventListener('keydown', onKey);
     window.addEventListener('scroll', onScroll, true);
+    setTimeout(() => { if (!closed) document.addEventListener('click', onOutside); }, 0);
   });
 }
 
