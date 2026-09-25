@@ -32,7 +32,7 @@
         <div class="set-title" title="偏好保存在本机浏览器，仅对当前设备生效">页面偏好</div>
         <div class="sec first">自动探测</div>
         <!-- 说明文字统一走 title：鼠标悬浮该行查看，弹层内不再堆砌大段提示 -->
-        <div class="srow" title="探测器总开关。关闭（默认）时永不触发探测：开页、定时重探、容器启停、手动刷新都不探，所有状态点保持灰点；开启后下面两项才生效">
+        <div class="srow" title="本机探测器开关（仅当前设备生效）。关闭（默认）时本机永不触发探测：开页、定时重探、容器启停、手动刷新都不探，所有状态点保持灰点；开启后才按下面两项的节奏探测（还需后台「站点设置 → 可达性检测」总闸开启，且该卡片所在分组未被设为关闭）">
           <span class="lbl">启用探测</span>
           <div class="right">
             <label class="switch">
@@ -103,6 +103,15 @@
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button></div>
       <div class="memo-body" id="memoBody"></div>
+    </div>
+  </div>
+
+  <!-- 操作确认浮窗（容器启停 / 重启等；定位在对应卡片上方，替代浏览器原生 confirm） -->
+  <div class="pop-confirm" id="popConfirm" style="display:none">
+    <div class="pc-msg" id="pcMsg"></div>
+    <div class="pc-foot">
+      <button class="btn mini" id="pcCancel">取消</button>
+      <button class="btn mini primary" id="pcOk">确认</button>
     </div>
   </div>
 

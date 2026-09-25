@@ -30,11 +30,78 @@ const post = (path, body) => api(path, { method: 'POST', headers: { 'Content-Typ
 const put = (path, body) => api(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const del = (path) => api(path, { method: 'DELETE' });
 
+/* ------------------------------------------------------------ 页面内浮窗（替代浏览器原生 confirm / prompt） */
+
+const popConfirm = el('popConfirm');
+
+// 把浮窗定位到锚点元素上方（空间不足则落到下方），水平对齐锚点中心并夹在视口内
+function placePop(pop, anchor) {
+  pop.style.transform = '';
+  if (!anchor) {
+    pop.style.left = '50%';
+    pop.style.top = '120px';
+    pop.style.transform = 'translateX(-50%)';
+    return;
+  }
+  const a = anchor.getBoundingClientRect();
+  const r = pop.getBoundingClientRect();
+  let top = a.top - r.height - 10;
+  if (top < 8) top = Math.min(a.bottom + 10, window.innerHeight - r.height - 8);
+  const left = Math.max(8, Math.min(a.left + a.width / 2 - r.width / 2, window.innerWidth - r.width - 8));
+  pop.style.left = left + 'px';
+  pop.style.top = Math.max(8, top) + 'px';
+}
+
+// askPop 弹出浮窗并等待用户操作：
+//   无 input → 确认框，返回 true / false；有 input → 输入框，返回去掉首尾空白的文本或 null
+function askPop(opts) {
+  return new Promise((resolve) => {
+    const input = el('pcInput');
+    const withInput = opts.input !== undefined;
+    el('pcMsg').textContent = opts.message;
+    el('pcOk').textContent = opts.okLabel || '确定';
+    input.style.display = withInput ? '' : 'none';
+    if (withInput) input.value = opts.input;
+    popConfirm.style.display = 'block';
+    placePop(popConfirm, opts.anchor);
+    if (withInput) { input.focus(); input.select(); }
+
+    let closed = false;
+    const finish = (v) => {
+      if (closed) return;
+      closed = true;
+      popConfirm.style.display = 'none';
+      el('pcOk').removeEventListener('click', onOk);
+      el('pcCancel').removeEventListener('click', onCancel);
+      input.removeEventListener('keydown', onInputKey);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
+      resolve(v);
+    };
+    const onOk = () => finish(withInput ? (input.value.trim() || null) : true);
+    const onCancel = () => finish(withInput ? null : false);
+    const onInputKey = (e) => {
+      if (e.key === 'Enter') onOk();
+      else if (e.key === 'Escape') onCancel();
+    };
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    const onScroll = () => finish(withInput ? null : false);
+    el('pcOk').addEventListener('click', onOk);
+    el('pcCancel').addEventListener('click', onCancel);
+    input.addEventListener('keydown', onInputKey);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, true);
+  });
+}
+
+const askConfirm = (message, anchor, okLabel) => askPop({ message, anchor, okLabel });
+const askPrompt = (message, value, anchor) => askPop({ message, input: value, anchor });
+
 /* ------------------------------------------------------------ 数据加载 */
 
 async function reload() {
   const [board, items] = await Promise.all([api('/api/board'), api('/api/items')]);
-  state.groups = board.groups.map((g) => ({ id: g.id, name: g.name, sort: g.sort }));
+  state.groups = board.groups.map((g) => ({ id: g.id, name: g.name, sort: g.sort, probe: g.probe || '' }));
   state.items = items;
   state.settings = board.settings || {};
   state.features = board.features || {};
@@ -86,12 +153,26 @@ function renderGroups() {
         <div style="font-weight:600">${escapeHTML(g.name)} <span class="badge ${enabled ? 'on' : 'off'}">${enabled} 启用</span></div>
         <div class="sub">共 ${total} 张卡片</div>
       </div>
+      <select class="probe-sel" data-probe="${g.id}" title="该分组卡片的可达性检测：站点总闸关闭时一律不探测，此配置不生效；总闸开启后，选「关闭」可让本分组不参与探测">
+        <option value=""${g.probe ? '' : ' selected'}>探测：跟随总闸</option>
+        <option value="on"${g.probe === 'on' ? ' selected' : ''}>探测：开启</option>
+        <option value="off"${g.probe === 'off' ? ' selected' : ''}>探测：关闭</option>
+      </select>
       <button class="btn mini" data-act="up" data-i="${i}" ${i === 0 ? 'disabled' : ''}>上移</button>
       <button class="btn mini" data-act="down" data-i="${i}" ${i === state.groups.length - 1 ? 'disabled' : ''}>下移</button>
       <button class="btn mini" data-act="rename" data-i="${i}">重命名</button>
       <button class="btn mini danger" data-act="del" data-i="${i}">删除</button>
     </div>`;
   }).join('');
+
+  box.querySelectorAll('select[data-probe]').forEach((sel) => {
+    const g = state.groups.find((x) => String(x.id) === sel.dataset.probe);
+    sel.addEventListener('change', async () => {
+      await put(`/api/groups/${g.id}`, { name: g.name, sort: g.sort, probe: sel.value });
+      await reload();
+      toast('分组探测设置已更新');
+    });
+  });
 
   box.querySelectorAll('button').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -104,14 +185,15 @@ function renderGroups() {
         await post('/api/groups/sort', { ids });
         await reload();
       } else if (btn.dataset.act === 'rename') {
-        const name = prompt('新的分组名', g.name);
-        if (name && name.trim()) {
-          await put(`/api/groups/${g.id}`, { name: name.trim(), sort: g.sort });
+        const name = await askPrompt('新的分组名', g.name, btn.closest('.row'));
+        if (name) {
+          await put(`/api/groups/${g.id}`, { name, sort: g.sort, probe: g.probe || '' });
           await reload();
         }
       } else if (btn.dataset.act === 'del') {
         const n = state.items.filter((it) => it.group_id === g.id).length;
-        if (!confirm(`删除分组「${g.name}」？${n ? `该分组下 ${n} 张卡片会一并删除。` : ''}`)) return;
+        const ok = await askConfirm(`删除分组「${g.name}」？${n ? `该分组下 ${n} 张卡片会一并删除。` : ''}`, btn.closest('.row'), '删除');
+        if (!ok) return;
         await del(`/api/groups/${g.id}`);
         await reload();
       }
@@ -170,7 +252,8 @@ function renderItems() {
   tbody.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => openModal(Number(b.dataset.edit))));
   tbody.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
     const it = state.items.find((x) => x.id === Number(b.dataset.del));
-    if (!confirm(`删除卡片「${it.name}」？`)) return;
+    const ok = await askConfirm(`删除卡片「${it.name}」？`, b.closest('tr'), '删除');
+    if (!ok) return;
     await del(`/api/items/${it.id}`);
     await reload();
   }));
@@ -334,6 +417,7 @@ function renderSettings() {
   el('setMask').value = s.background_mask ?? 0;
   el('setBlur').value = s.background_blur ?? 2;
   el('setMaxWidth').value = s.max_width || 1200;
+  el('setProbe').checked = s.probe_enabled === '1';
   el('setDocker').checked = s.docker_enabled !== '0';
   el('setShowDisabled').checked = s.show_disabled === '1';
   el('setShowDisabledGuest').checked = s.show_disabled_guest === '1';
@@ -353,6 +437,7 @@ async function saveSettings() {
     background_mask: el('setMask').value,
     background_blur: el('setBlur').value,
     max_width: el('setMaxWidth').value,
+    probe_enabled: el('setProbe').checked ? '1' : '0',
     docker_enabled: el('setDocker').checked ? '1' : '0',
     show_disabled: el('setShowDisabled').checked ? '1' : '0',
     show_disabled_guest: el('setShowDisabledGuest').checked ? '1' : '0',

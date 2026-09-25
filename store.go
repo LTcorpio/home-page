@@ -32,6 +32,11 @@ type Group struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
 	Sort int    `json:"sort"`
+	// Probe 该分组卡片的可达性检测配置：
+	//   ""    跟随总闸（站点设置 probe_enabled）
+	//   "on"  开启（总闸关闭时仍不探测，总闸开启后与该分组跟随总闸等价）
+	//   "off" 关闭（总闸开启后让该分组不参与探测）
+	Probe string `json:"probe"`
 }
 
 // Item 一张导航卡片
@@ -87,9 +92,10 @@ func initStore() {
 func migrate() {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS groups (
-			id   INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL,
-			sort INTEGER NOT NULL DEFAULT 0
+			id    INTEGER PRIMARY KEY AUTOINCREMENT,
+			name  TEXT NOT NULL,
+			sort  INTEGER NOT NULL DEFAULT 0,
+			probe TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS items (
 			id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,15 +127,16 @@ func migrate() {
 		}
 	}
 	// 兼容旧库：补充后加的列
-	for _, col := range []struct{ name, ddl string }{
-		{"memo", "ALTER TABLE items ADD COLUMN memo TEXT NOT NULL DEFAULT ''"},
-		{"lan_url", "ALTER TABLE items ADD COLUMN lan_url TEXT NOT NULL DEFAULT ''"},
+	for _, col := range []struct{ table, name, ddl string }{
+		{"items", "memo", "ALTER TABLE items ADD COLUMN memo TEXT NOT NULL DEFAULT ''"},
+		{"items", "lan_url", "ALTER TABLE items ADD COLUMN lan_url TEXT NOT NULL DEFAULT ''"},
+		{"groups", "probe", "ALTER TABLE groups ADD COLUMN probe TEXT NOT NULL DEFAULT ''"},
 	} {
-		if !tableHasColumn("items", col.name) {
+		if !tableHasColumn(col.table, col.name) {
 			if _, err := db.Exec(col.ddl); err != nil {
-				log.Printf("给 items 补列 %s 失败: %v", col.name, err)
+				log.Printf("给 %s 补列 %s 失败: %v", col.table, col.name, err)
 			} else {
-				log.Printf("已给 items 补充列 %s", col.name)
+				log.Printf("已给 %s 补充列 %s", col.table, col.name)
 			}
 		}
 	}
@@ -223,6 +230,7 @@ var defaultSettings = map[string]string{
 	"show_disabled_guest": "0",                          // 访客首页是否置灰显示禁用卡；0=不显示（访客看不到，仅管理员可选开）
 	"admin_groups":        "admins",                     // 拥有管理后台权限的 SSO 用户组（逗号分隔，取自 SSO 网关 Remote-Groups）
 	"known_groups":        "admins,family,guest",        // 卡片「访问组」的候选组（仅作下拉提示，不限制自由填写；guest 为免登录访客身份）
+	"probe_enabled":       "0",                          // 可达性检测站点总闸：0=关闭（默认，避免自签 https 等被误判为不可达）；关闭时一律不探测，分组配置不生效
 	"auth_portal":         "", // SSO 认证中心地址：右上角身份 chip 点击跳转（切换/登录账号）；留空则 chip 不可点
 	"background_image":    "",                           // 壁纸地址，如 /icons/bg.jpg；留空用深色渐变兜底
 	"background_mask":     "0",                          // 壁纸上的黑色遮罩透明度 0~1
@@ -276,7 +284,7 @@ func nowStr() string {
 // --- 分组 ---------------------------------------------------------------
 
 func listGroups() ([]Group, error) {
-	rows, err := db.Query(`SELECT id, name, sort FROM groups ORDER BY sort, id`)
+	rows, err := db.Query(`SELECT id, name, sort, probe FROM groups ORDER BY sort, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +292,7 @@ func listGroups() ([]Group, error) {
 	out := []Group{}
 	for rows.Next() {
 		var g Group
-		if err := rows.Scan(&g.ID, &g.Name, &g.Sort); err != nil {
+		if err := rows.Scan(&g.ID, &g.Name, &g.Sort, &g.Probe); err != nil {
 			return nil, err
 		}
 		out = append(out, g)
@@ -293,7 +301,7 @@ func listGroups() ([]Group, error) {
 }
 
 func createGroup(g Group) (int64, error) {
-	res, err := db.Exec(`INSERT INTO groups(name, sort) VALUES (?, ?)`, g.Name, g.Sort)
+	res, err := db.Exec(`INSERT INTO groups(name, sort, probe) VALUES (?, ?, ?)`, g.Name, g.Sort, g.Probe)
 	if err != nil {
 		return 0, err
 	}
@@ -301,7 +309,7 @@ func createGroup(g Group) (int64, error) {
 }
 
 func updateGroup(g Group) error {
-	_, err := db.Exec(`UPDATE groups SET name = ?, sort = ? WHERE id = ?`, g.Name, g.Sort, g.ID)
+	_, err := db.Exec(`UPDATE groups SET name = ?, sort = ?, probe = ? WHERE id = ?`, g.Name, g.Sort, g.Probe, g.ID)
 	return err
 }
 

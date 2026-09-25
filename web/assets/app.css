@@ -471,6 +471,30 @@ body.no-select, body.no-select * { user-select: none; -webkit-user-select: none;
 
 .memo-empty { color: var(--text-faint); }
 
+/* 操作确认 / 输入浮窗（替代浏览器原生 confirm / prompt）
+   定位在触发元素（首页卡片、后台表格行）上方，按钮紧邻触发点，省去鼠标长距离移动 */
+.pop-confirm {
+  position: fixed;
+  z-index: 80;
+  width: 260px;
+  max-width: calc(100vw - 16px);
+  padding: 12px 14px 10px;
+  border-radius: 12px;
+  background: rgba(30, 31, 38, .96);
+  border: 1px solid rgba(255, 255, 255, .1);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .5);
+  backdrop-filter: blur(12px);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pop-confirm .pc-msg { font-size: 13px; line-height: 1.5; color: var(--text); word-break: break-word; }
+.pop-confirm input[type="text"] { width: 100%; margin-top: 10px; }
+.pop-confirm .pc-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+/* 分组行的探测配置下拉（后台分组列表） */
+.row select.probe-sel { flex: none; width: auto; padding: 4px 8px; font-size: 12px; border-radius: 8px; }
+
 /* 触屏设备：菜单项加大，方便手指点按 */
 @media (pointer: coarse) {
   .ctx-menu { min-width: 190px; padding: 8px; }
