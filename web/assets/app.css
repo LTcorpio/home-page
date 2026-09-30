@@ -47,6 +47,11 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
+  /* 中文排版: ① 中西文之间自动留白（CJK 与拉丁字母/数字之间插入细间隙，旧浏览器静默退化）
+     ② 标点开明式: 全角标点压成半宽（OpenType halt 特性；需字体自带该特性，PingFang SC /
+     Hiragino Sans GB 已确认支持，STHeiti、部分 Windows 字体没有） */
+  text-autospace: normal;
+  font-feature-settings: 'halt' 1;
 }
 
 a { color: inherit; text-decoration: none; }
