@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # 构建 home-page 镜像（源码目录内执行 ./build.sh）
+# 多阶段构建：Node 打包 React 前端 → Go 编译后端 → 运行镜像内由 Go 托管 dist。
 set -euo pipefail
 cd "$(dirname "$0")"
 

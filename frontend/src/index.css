@@ -1,0 +1,178 @@
+@import 'tailwindcss';
+
+/* ============================ 设计令牌 ============================
+   与旧版 app.css 保持同一套视觉：半透明深色卡片 + 白字阴影 + 壁纸。 */
+@theme {
+  --color-card: rgba(42, 42, 42, 0.42);
+  --color-card-hover: rgba(42, 42, 42, 0.58);
+  --color-ink: #ffffff;
+  --color-dim: rgba(255, 255, 255, 0.72);
+  --color-faint: rgba(255, 255, 255, 0.45);
+  --color-ok: #4ade80;
+  --color-bad: #f87171;
+
+  --radius-card: 16px;
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    min-height: 100%;
+  }
+
+  body {
+    overflow: hidden;
+    background: #1c1d22;
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    /* 中文排版: 中西文自动留白 + 标点开明式（字体支持时生效） */
+    text-autospace: normal;
+    font-feature-settings: 'halt' 1;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+    background-color: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.3);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.45);
+  }
+  ::-webkit-scrollbar-corner {
+    background-color: transparent;
+  }
+}
+
+/* 移动端隐藏滚动条（保留滚动能力） */
+@media (max-width: 1023px) {
+  * {
+    scrollbar-width: none;
+  }
+
+  ::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+}
+
+/* 管理后台亮色主题：只在该子树内覆盖设计令牌，首页仍保持深色。
+   中性色统一偏暖（呼应壁纸的绯红色），避免冷白灰让整页显得发白。 */
+.admin-light {
+  --color-card: #ffffff;
+  --color-card-hover: #f7f2f4;
+  --color-ink: #241d20;
+  --color-dim: #5f5458;
+  --color-faint: #9a8d91;
+  --color-ok: #15803d;
+  --color-bad: #b91c1c;
+  color: var(--color-ink);
+  scrollbar-color: rgba(36, 29, 32, 0.28) transparent;
+}
+
+.admin-light ::-webkit-scrollbar-thumb {
+  background-color: rgba(36, 29, 32, 0.24);
+}
+
+.admin-light ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(36, 29, 32, 0.4);
+}
+
+/* 横向滑动的容器隐藏滚动条（窄屏分组标签栏等） */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* 首页禁止选中文本：避免移动端长按 / 滑动时弹出系统选择与高亮 */
+.no-select,
+.no-select * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.text-shadow {
+  text-shadow: 2px 2px 50px rgb(0 0 0);
+}
+
+/* 弹层 / 备注等需要可复制的区域 */
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 时钟秒数冒号：大字号下冒号字形偏下，独立 span 上移微调（macOS 菜单栏时钟效果） */
+.clock-colon {
+  position: relative;
+  top: -0.06em;
+}
+
+/* 状态点呼吸等待（探测进行中） */
+@keyframes dot-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.dot-pending {
+  animation: dot-pulse 1.2s infinite;
+}
+
+/* 刷新按钮旋转 */
+@keyframes spin-rot {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: spin-rot 0.7s linear infinite;
+}
+
+/* 加载遮罩：延迟 120ms 再浮现，避免本地快速请求时遮罩闪烁 */
+@keyframes mask-in {
+  to {
+    opacity: 1;
+  }
+}
+.mask-in {
+  opacity: 0;
+  animation: mask-in 0.15s ease 0.12s forwards;
+}

@@ -1,6 +1,6 @@
 # home-page
 
-局域网自用的**导航页 + 服务可达性状态 + Docker 容器启停**，单容器、单二进制、占用 80 端口（访问不用带端口）。
+局域网自用的**导航页 + 服务可达性状态 + Docker 容器启停**：前后端分离开发（React + Go），生产仍为单容器、单进程（Go 同时托管前端静态文件），占用 80 端口（访问不用带端口）。
 视觉高仿 [Sun-Panel](https://github.com/hslr-s/sun-panel)（壁纸 + 白字阴影 + 半透明深色横向卡片），功能按自己需要裁剪：导航卡片、状态灯、服务地址、容器启停、卡片备忘录。
 
 ## 功能
@@ -35,20 +35,27 @@
 ## 技术栈
 
 - 后端：Go 单二进制 + `net/http`（Go 1.22+ 路由），SQLite（纯 Go 驱动 `modernc.org/sqlite`，无需 CGO）
-- 前端：原生 HTML/CSS/JS 两个页面，`go:embed` 打进二进制，无 node_modules、无构建步骤
+- 前端：React 19 + TypeScript + Vite 6 + Tailwind CSS 4，路由用 React Router（`/` 首页、`/admin` 管理后台）
+- 开发期：Vite dev server（:5173）托管前端，`/api` 与 `/icons` 代理到本机 Go（:18081）；生产由 Go 以 `WEB_ROOT` 托管 `frontend/dist`
 - Docker 控制：直连 `/var/run/docker.sock` 调 Engine API，不引入 SDK
 
 ## 目录结构
 
 ```
 Programs/home-page/
-├── main.go        # 路由与 HTTP 处理
-├── store.go       # SQLite：groups / items / settings
-├── docker.go      # Docker Engine API（unix socket）
-├── icons.go       # favicon 抓取与图标文件
-├── web/           # 前端（index.html / admin.html / assets）
-├── Dockerfile     # 多阶段构建
-└── build.sh       # 构建镜像
+├── backend/          # Go 后端
+│   ├── main.go       # 路由与 HTTP 处理、静态托管
+│   ├── store.go      # SQLite：groups / items / settings
+│   ├── docker.go     # Docker Engine API（unix socket）
+│   └── icons.go      # favicon 抓取与图标文件
+├── frontend/         # React + Vite + Tailwind
+│   ├── src/pages/    # HomePage / admin 管理后台
+│   ├── src/components/
+│   └── vite.config.ts
+├── scripts/dev.sh    # make dev 的启动脚本（前端 + 后端）
+├── Makefile          # dev / deploy / build
+├── Dockerfile        # 多阶段：Node 构建前端 → Go 编译 → 运行镜像
+└── build.sh          # 只构建镜像
 ```
 
 运行时数据（由 compose 挂载，`./home-page` 相对 compose 目录）：
@@ -65,17 +72,30 @@ Docker/compose/lifestyle/home-page/
 再执行 WAL 检查点并关闭数据库，`-wal/-shm` 临时文件随之清理，数据目录只剩主库。
 服务被强杀（SIGKILL/断电）时残留的 WAL 会在下次启动时自动回放并收尾，数据不丢。
 
+## 本地开发
+
+```bash
+cd "/Volumes/ZHITAI TiPlus5000 1TB/Programs/home-page"
+make dev
+```
+
+- 后端 `127.0.0.1:18081`，前端 `0.0.0.0:5173`（局域网可访问）；打开 `http://localhost:5173/` 与 `/admin`
+- **开发直接使用生产数据库**：`DATA_DIR` 默认指向 `Docker/compose/lifestyle/home-page`（`home-page.db` 与 `icons/`），不发散到独立测试库
+- 开发态 API 由 Vite 代理注入调试身份 `dev`（组 `admins`），无需 SSO 即可进后台；可用 `VITE_DEV_USER` / `VITE_DEV_NAME` / `VITE_DEV_GROUPS` 覆盖（头值须为 ASCII）
+- 生产容器正在运行时脚本会提醒：两个进程共享同一个 SQLite 文件，需完全隔离可先 `docker stop home-page`，开发完再 `make deploy`
+- 首次运行会自动 `npm install`；`Ctrl-C` 同时关闭前后端
+
 ## 部署
 
 服务已并入 lifestyle 栈管理（与 film-memo / personal-crm 等同一 compose 文件）：
 
 ```bash
-# 1) 构建镜像
-cd "/Volumes/ZHITAI TiPlus5000 1TB/Programs/home-page" && ./build.sh
-
-# 2) 启动 / 重启
-cd "/Volumes/ZHITAI TiPlus5000 1TB/Docker/compose/lifestyle" && docker compose up -d home-page
+cd "/Volumes/ZHITAI TiPlus5000 1TB/Programs/home-page"
+make deploy
 ```
+
+`make deploy` 会先构建 `home-page:latest`（Node 构建前端 → Go 编译 → 运行镜像内置 `/srv`），再执行
+`docker compose up -d --no-deps --force-recreate home-page`。只构建镜像可用 `make build` 或 `./build.sh`。
 
 - 容器端口映射为 `127.0.0.1:18080:80`（**只绑本机**）：宿主 nginx 在 `https://home.lan` 反代 `http://127.0.0.1:18080` 并做 Authelia 鉴权
 - 另有一条**局域网直连**入口 `http://192.168.1.100/`（80 端口，nginx 收口，仅放行 `192.168.1.0/24`，且**强制覆盖身份头为 guest**）——给配不了 `home.lan` 私有 DNS 的手机 / 平板 / 电视用；此入口下首页卡片自动改用各卡片的 `lan_url`（无 SSO 服务直连）。80 端口按 Host 分流：`home.lan` 及子域仍 301 跳 HTTPS，其余（含 IP 字面量）才落到首页
@@ -94,7 +114,9 @@ cd "/Volumes/ZHITAI TiPlus5000 1TB/Docker/compose/lifestyle" && docker compose u
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `PORT` | `80` | 监听端口 |
+| `ADDR` | 空 | 完整监听地址（如 `127.0.0.1:18081`），设置后覆盖 `PORT`；开发脚本用它把后端限制在本机 |
 | `DATA_DIR` | `/data` | 数据库与图标目录 |
+| `WEB_ROOT` | 空 | 前端构建产物目录；镜像内为 `/srv`，留空则只提供 API（开发期由 Vite 托管前端） |
 | `SEED_HOST` | `192.168.1.100` | 首次初始化示例卡片用的宿主地址 |
 | `DOCKER_SOCK` | `/var/run/docker.sock` | Docker Engine API 套接字 |
 | `TRUSTED_PROXY_CIDRS` | `127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,169.254.0.0/16,198.18.0.0/15,::1/128,fc00::/7` | 允许注入身份头（`Remote-User` / `Remote-Groups`）的来源网段，CIDR 逗号分隔；不在范围内按匿名处理 |
