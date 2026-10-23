@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -20,8 +18,9 @@ import (
 	"time"
 )
 
-//go:embed all:web
-var webFS embed.FS
+// webRoot 前端构建产物目录（frontend/dist）。生产镜像设为 /srv；
+// 开发期留空，由 Vite dev server 托管前端，后端只提供 API。
+var webRoot = strings.TrimSpace(os.Getenv("WEB_ROOT"))
 
 // ---------------------------------------------------------------- 工具
 
@@ -194,21 +193,12 @@ func requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 
 // ---------------------------------------------------------------- 页面
 
+// serveIndex 返回前端 SPA 入口（/ 与 /admin 共用，路由由前端 React Router 决定）。
+// index.html 不缓存：发版后浏览器立即拿到新的资源清单。
 func serveIndex(w http.ResponseWriter, r *http.Request) {
-	b, err := webFS.ReadFile("web/index.html")
+	b, err := os.ReadFile(filepath.Join(webRoot, "index.html"))
 	if err != nil {
 		http.Error(w, "首页缺失", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Write(b)
-}
-
-func serveAdmin(w http.ResponseWriter, r *http.Request) {
-	b, err := webFS.ReadFile("web/admin.html")
-	if err != nil {
-		http.Error(w, "管理页缺失", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -839,16 +829,16 @@ func main() {
 	initStore()
 	startContainerLoop()
 
-	webRoot, err := fs.Sub(webFS, "web")
-	if err != nil {
-		log.Fatalf("加载前端资源失败: %v", err)
-	}
-
 	mux := http.NewServeMux()
-	mux.Handle("GET /assets/", noStore(http.FileServer(http.FS(webRoot))))
 	mux.Handle("GET /icons/", http.StripPrefix("/icons/", http.FileServer(http.Dir(iconDir))))
-	mux.HandleFunc("GET /{$}", serveIndex) // 仅精确匹配根路径，其余路径 404
-	mux.HandleFunc("GET /admin", requireAdmin(serveAdmin))
+	if st, err := os.Stat(webRoot); webRoot != "" && err == nil && st.IsDir() {
+		mux.Handle("GET /assets/", noStore(http.StripPrefix("/assets/", http.FileServer(http.Dir(filepath.Join(webRoot, "assets"))))))
+		mux.HandleFunc("GET /{$}", serveIndex)                 // 首页
+		mux.HandleFunc("GET /admin", requireAdmin(serveIndex)) // 管理后台（仅管理员）
+		log.Printf("前端静态目录: %s", webRoot)
+	} else {
+		log.Printf("未托管前端静态文件（WEB_ROOT=%q），仅提供 API", webRoot)
+	}
 
 	mux.HandleFunc("GET /api/board", handleBoard)
 	mux.HandleFunc("GET /api/containers", handleContainerList)
@@ -866,7 +856,8 @@ func main() {
 	mux.HandleFunc("POST /api/icons/fetch", requireAdmin(handleIconFetch))
 	mux.HandleFunc("GET /api/icons/proxy", handleIconProxy)
 
-	addr := ":" + envOr("PORT", "80")
+	// ADDR 可覆盖完整监听地址（开发期绑定 127.0.0.1），默认仍按 PORT 监听全部网卡
+	addr := envOr("ADDR", ":"+envOr("PORT", "80"))
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           mux,

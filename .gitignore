@@ -1,3 +1,15 @@
-home-page
 .DS_Store
+
+# 本地编译产物
+home-page
+backend/home-page
+
+# 数据库与临时文件
 *.db
+*.db-wal
+*.db-shm
+
+# 前端依赖与构建产物（镜像内重新构建）
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo

@@ -1,28 +1,46 @@
-# 构建阶段：编译 Go 二进制（基础镜像统一走 Docker Hub 官方源，不使用第三方镜像源）
-FROM golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191 AS builder
+# home-page 单镜像：React 前端构建产物 + Go 后端，单进程运行（Go 直接托管 dist，无 Caddy）。
+#
+# 构建（在仓库根目录）：
+#   docker build -t home-page:latest .
+# 运行：
+#   docker run -d -p 18080:80 -v /path/to/home-page:/data -v /var/run/docker.sock:/var/run/docker.sock home-page:latest
+#
+# 说明：
+#   - 前端在 node 阶段构建，产物拷到 /srv；后端以 WEB_ROOT=/srv 托管静态文件。
+#   - 运行镜像内只跑一个进程，信号与日志直接由 home-page 处理。
+#   - TLS 与 SSO 不在此容器终结：由宿主 nginx / SSO 网关 注入身份头。
 
-ENV GOPROXY=https://goproxy.cn,direct \
-    CGO_ENABLED=0 \
-    GOOS=linux
-
+FROM node:22-alpine AS web
 WORKDIR /app
-COPY go.mod go.sum ./
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+FROM golang:1.24-alpine AS api
+WORKDIR /src
+ENV CGO_ENABLED=0 \
+    GOOS=linux \
+    GOPROXY=https://goproxy.cn,direct
+COPY backend/go.mod backend/go.sum ./
 RUN go mod download
-COPY . .
-RUN go build -o home-page -ldflags="-s -w" .
+COPY backend/ ./
+RUN go build -trimpath -ldflags="-s -w" -o /out/home-page .
 
-# 运行阶段：最小镜像，前端已 go:embed 进二进制
-FROM alpine:latest@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
-RUN apk --no-cache add ca-certificates tzdata
-WORKDIR /app
-COPY --from=builder /app/home-page /app/home-page
+FROM alpine:3.22
+RUN apk --no-cache add ca-certificates tzdata \
+ && mkdir -p /app /srv /data
+COPY --from=api /out/home-page /app/home-page
+COPY --from=web /app/dist /srv
 
 ENV TZ=Asia/Shanghai \
     PORT=80 \
     DATA_DIR=/data \
+    WEB_ROOT=/srv \
     HOST_PROC=/host/proc \
     HOST_ROOT=/host \
     DOCKER_SOCK=/var/run/docker.sock
 
+WORKDIR /app
 EXPOSE 80
 ENTRYPOINT ["/app/home-page"]
