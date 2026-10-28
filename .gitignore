@@ -13,3 +13,6 @@ backend/home-page
 frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo
+
+# 本地工作区数据（项目记忆等）
+.workbuddy/
