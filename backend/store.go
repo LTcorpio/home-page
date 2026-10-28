@@ -22,7 +22,7 @@ var (
 	iconDir = filepath.Join(dataDir, "icons")
 )
 
-// seedHost 首次初始化时写入示例卡片使用的宿主机地址
+// seedHost 首次初始化时写入示例卡片使用的宿主机地址（默认回环，可在后台修改）
 var seedHost = envOr("SEED_HOST", "127.0.0.1")
 
 var db *sql.DB
@@ -226,18 +226,18 @@ func tableHasColumn(table, col string) bool {
 var defaultSettings = map[string]string{
 	"site_title":          "Home",
 	"docker_enabled":      "1",
-	"show_disabled":       "1",                          // 管理员首页是否置灰显示禁用卡；1=显示（便于管理核对）
-	"show_disabled_guest": "0",                          // 访客首页是否置灰显示禁用卡；0=不显示（访客看不到，仅管理员可选开）
-	"show_desc_admin":     "1",                          // 管理员首页是否显示卡片描述
-	"show_desc_user":      "1",                          // 已登录用户（非管理员）首页是否显示卡片描述
-	"show_desc_guest":     "1",                          // 游客（未登录）首页是否显示卡片描述
-	"admin_groups":        "admins",                     // 拥有管理后台权限的 SSO 用户组（逗号分隔，取自 SSO 网关 Remote-Groups）
-	"known_groups":        "admins,family,guest",        // 卡片「访问组」的候选组（仅作下拉提示，不限制自由填写；guest 为免登录访客身份）
-	"probe_enabled":       "0",                          // 可达性检测站点总闸：0=关闭（默认，避免自签 https 等被误判为不可达）；关闭时一律不探测，分组配置不生效
-	"auth_portal":         "", // SSO 认证中心地址：右上角身份 chip 点击跳转（切换/登录账号）；留空则 chip 不可点
-	"background_image":    "",                           // 壁纸地址，如 /icons/bg.jpg；留空用深色渐变兜底
-	"background_mask":     "0",                          // 壁纸上的黑色遮罩透明度 0~1
-	"background_blur":     "2",                          // 壁纸模糊 px
+	"show_disabled":       "1",                   // 管理员首页是否置灰显示禁用卡；1=显示（便于管理核对）
+	"show_disabled_guest": "0",                   // 访客首页是否置灰显示禁用卡；0=不显示（访客看不到，仅管理员可选开）
+	"show_desc_admin":     "1",                   // 管理员首页是否显示卡片描述
+	"show_desc_user":      "1",                   // 已登录用户（非管理员）首页是否显示卡片描述
+	"show_desc_guest":     "1",                   // 游客（未登录）首页是否显示卡片描述
+	"admin_groups":        "admins",              // 拥有管理后台权限的 SSO 用户组（逗号分隔，取自 SSO 网关注入的组）
+	"known_groups":        "admins,family,guest", // 卡片「访问组」的候选组（仅作下拉提示，不限制自由填写；guest 为免登录访客身份）
+	"probe_enabled":       "0",                   // 可达性检测站点总闸：0=关闭（默认，避免自签 https 等被误判为不可达）；关闭时一律不探测，分组配置不生效
+	"auth_portal":         "",                    // SSO 认证中心地址：右上角身份 chip 点击跳转（切换/登录账号）；留空则 chip 不可点
+	"background_image":    "",                    // 壁纸地址，如 /icons/bg.jpg；留空用深色渐变兜底
+	"background_mask":     "0",                   // 壁纸上的黑色遮罩透明度 0~1
+	"background_blur":     "2",                   // 壁纸模糊 px
 	"max_width":           "1200",
 }
 
@@ -266,7 +266,7 @@ func seed() {
 		{Name: "房租管理", URL: "http://" + seedHost + ":9097", Description: "租金与合同台账", ContainerName: "rent-management"},
 		{Name: "抖音导出", URL: "http://" + seedHost + ":8000", Description: "聊天记录导出工具", ContainerName: "douyin-chat-export"},
 		{Name: "备份管理", URL: "http://" + seedHost + ":8390", Description: "容器与数据备份", ContainerName: "docker-backup-manager"},
-		{Name: "影视仓搜索", URL: "http://127.0.0.1:9978", Description: "电视端影视仓搜索引擎"},
+		{Name: "影视仓搜索", URL: "http://" + seedHost + ":9978", Description: "电视端影视仓搜索引擎"},
 	}
 	for i := range items {
 		items[i].GroupID = gid

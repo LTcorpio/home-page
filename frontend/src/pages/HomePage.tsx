@@ -36,8 +36,8 @@ interface ProbeResult {
 const PROBE_TIMEOUT = 4000
 const EMPTY_IDENTITY: Identity = { user: '', name: '', email: '', groups: [] }
 
-// 经域名访问首页（https://example.com，走 SSO）→ 用卡片主地址 url；
-// 经 IP 直连访问（http://127.0.0.1/）→ 配了局域网地址的卡片改用 lan_url。
+// 经域名访问首页（走 SSO）→ 用卡片主地址 url；
+// 经 IP 直连访问 → 配了局域网地址的卡片改用 lan_url。
 const LAN_MODE = (() => {
   const h = String(location.hostname || '').replace(/^\[|\]$/g, '')
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(':')

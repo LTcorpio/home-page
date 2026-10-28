@@ -82,10 +82,10 @@ func normalizeGroupProbe(v string) string {
 	return ""
 }
 
-// ---------------------------------------------------------------- 身份（SSO / SSO 网关）
+// ---------------------------------------------------------------- 身份（SSO）
 
-// identity 经 SSO 认证后的用户身份，取自 nginx 反代注入的可信头
-// （反向代理：Remote-User / Remote-Groups / Remote-Name / Remote-Email）
+// identity 经 SSO 认证后的用户身份，取自反向代理注入的可信头
+// （Remote-User / Remote-Groups / Remote-Name / Remote-Email）
 type identity struct {
 	User   string   `json:"user"`
 	Name   string   `json:"name"`
@@ -104,7 +104,7 @@ func clientIP(r *http.Request) net.IP {
 
 // trustedProxyCIDRs 允许注入身份头的来源网段：默认回环 + 私网。
 // home-page 只监听 127.0.0.1（见 compose 端口绑定），外部设备直连不进来；能连进来的
-// 只有宿主反代（nginx）与同网段容器。注意：经宿主端口转发后，容器看到的源 IP 是
+// 只有宿主反向代理与同网段容器。注意：经宿主端口转发后，容器看到的源 IP 是
 // VM 侧网关地址（不是 127.0.0.1），故不能只判回环。若部署环境源地址不在默认范围，
 // 用环境变量 TRUSTED_PROXY_CIDRS 覆盖（逗号分隔 CIDR，如 "10.0.0.0/8,127.0.0.0/8"）。
 var trustedProxyCIDRs = func() []*net.IPNet {
@@ -177,7 +177,7 @@ func (id identity) isAdmin() bool {
 }
 
 // isAdminRequest 管理员判定：以 SSO 用户组为依据（不再以 localhost 为依据，
-// 因为经 https://example.com 访问时 Host 不再是 localhost）
+// 因为经域名访问时 Host 不再是 localhost）
 func isAdminRequest(r *http.Request) bool { return identify(r).isAdmin() }
 
 // requireAdmin 管理接口保护：非管理员返回 403
@@ -554,7 +554,7 @@ func handleGroupSort(w http.ResponseWriter, r *http.Request) {
 
 // ---------------------------------------------------------------- 卡片 API
 
-// normalizeLanURL 规整局域网地址：允许只写 192.0.2.10:8080（自动补 http://），
+// normalizeLanURL 规整局域网地址：允许只写 host:port（自动补 http://），
 // 去掉首尾空白与结尾斜杠，保证是可直接打开 / 探测的 URL。
 func normalizeLanURL(raw string) string {
 	s := strings.TrimSpace(raw)

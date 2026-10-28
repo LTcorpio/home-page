@@ -363,7 +363,7 @@ export default function SettingsPanel({ settings, onChanged }: Props) {
               type="text"
               value={form.authPortal}
               onChange={(e) => setForm({ ...form, authPortal: e.target.value })}
-              placeholder=""
+              placeholder="https://sso.example.com/"
               className={INPUT}
             />
           </div>
