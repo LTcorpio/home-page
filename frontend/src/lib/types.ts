@@ -41,7 +41,8 @@ export interface BoardData {
   groups: BoardGroup[]
   features: { docker: boolean; admin: boolean }
   identity: Identity
-  now: string
+  now_ms: number // 服务端当前时刻（epoch 毫秒）
+  tz_offset_sec: number // 服务端时区偏移（秒）
 }
 
 export interface Container {

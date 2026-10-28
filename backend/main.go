@@ -266,16 +266,31 @@ func handleBoard(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, map[string]any{
-		"settings": settings,
-		"groups":   out,
-		"features": map[string]any{
-			"docker": getSetting("docker_enabled") == "1" && dockerAvailable(),
-			"admin":  isAdmin,
-		},
-		"identity": id, // 当前登录身份（匿名时 user 为空）
-		"now":      time.Now().Format("2006-01-02 15:04:05"),
-	})
+	resp := serverClock()
+	resp["settings"] = settings
+	resp["groups"] = out
+	resp["features"] = map[string]any{
+		"docker": getSetting("docker_enabled") == "1" && dockerAvailable(),
+		"admin":  isAdmin,
+	}
+	resp["identity"] = id // 当前登录身份（匿名时 user 为空）
+	writeJSON(w, resp)
+}
+
+// serverClock 服务端当前时刻（epoch 毫秒）与本地时区偏移（秒，东八区=28800）。
+// 首页据此校准时钟并按服务端时区渲染，避免客户端时间偏差 / 时区不同造成漂移。
+func serverClock() map[string]any {
+	now := time.Now()
+	_, offset := now.Zone()
+	return map[string]any{
+		"now_ms":        now.UnixMilli(),
+		"tz_offset_sec": offset,
+	}
+}
+
+// handleServerTime 轻量校时接口：首页据此周期性校正与补校，无需重拉整个看板
+func handleServerTime(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, serverClock())
 }
 
 // ---------------------------------------------------------------- 容器
@@ -841,6 +856,7 @@ func main() {
 	}
 
 	mux.HandleFunc("GET /api/board", handleBoard)
+	mux.HandleFunc("GET /api/time", handleServerTime)
 	mux.HandleFunc("GET /api/containers", handleContainerList)
 	// 以下均为管理操作：仅本机（管理员模式）可访问
 	mux.HandleFunc("POST /api/containers/{name}/{action}", requireAdmin(handleContainerAction))

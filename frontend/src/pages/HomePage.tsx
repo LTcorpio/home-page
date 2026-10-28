@@ -8,6 +8,7 @@ import {
   type TouchEvent,
 } from 'react'
 import { api } from '../lib/api'
+import { useServerClock } from '../lib/clock'
 import { DEFAULT_PREFS, readPrefs, splitList, writePrefs, type Prefs } from '../lib/prefs'
 import type {
   BoardData,
@@ -32,7 +33,6 @@ interface ProbeResult {
   ts: number
 }
 
-const WEEKDAYS = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
 const PROBE_TIMEOUT = 4000
 const EMPTY_IDENTITY: Identity = { user: '', name: '', email: '', groups: [] }
 
@@ -139,7 +139,7 @@ export default function HomePage() {
   const [memoItem, setMemoItem] = useState<Item | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [now, setNow] = useState(() => new Date())
+  const clock = useServerClock()
 
   const featuresRef = useRef(features)
   featuresRef.current = features
@@ -228,8 +228,10 @@ export default function HomePage() {
     let cancelled = false
     ;(async () => {
       try {
+        const sentAt = performance.now()
         const data = await api<BoardData>('/api/board')
         if (cancelled) return
+        clock.sync(data, sentAt)
         setSettings(data.settings || {})
         setGroups(data.groups || [])
         setFeatures(data.features || { docker: false, admin: false })
@@ -244,13 +246,7 @@ export default function HomePage() {
     return () => {
       cancelled = true
     }
-  }, [])
-
-  // 时钟
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(new Date()), 1000)
-    return () => window.clearInterval(t)
-  }, [])
+  }, [clock.sync])
 
   // 首页禁止选中文本
   useEffect(() => {
@@ -458,11 +454,15 @@ export default function HomePage() {
   if (menuItem?.memo) menuActions.push({ act: 'memo', label: '查看备注' })
   menuActions.push({ act: 'open', label: '打开链接' })
 
-  const hh = String(now.getHours()).padStart(2, '0')
-  const mm = String(now.getMinutes()).padStart(2, '0')
-  const ss = String(now.getSeconds()).padStart(2, '0')
-  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-  const weekday = WEEKDAYS[now.getDay()]
+  const { hh, mm, ss, dateStr, weekday } = clock.time
+
+  // 描述文本按访问身份分别控制：管理员 / 已登录用户 / 游客（未登录）
+  const viewerRole = features.admin
+    ? 'admin'
+    : identity.user || identity.name || identity.email
+      ? 'user'
+      : 'guest'
+  const showDesc = (settings[`show_desc_${viewerRole}`] ?? '1') === '1'
 
   const portal = (settings.auth_portal || '').trim()
   const chipLabel = identity.name || identity.user || ''
@@ -695,6 +695,7 @@ export default function HomePage() {
                           dot={st.dot}
                           dotTitle={st.title}
                           dead={st.dead}
+                          showDesc={showDesc}
                           canMenu={canShowMenu(it)}
                           onOpen={openItem}
                           onMenu={(item, x, y) => setMenu({ x, y, itemId: item.id })}
@@ -787,6 +788,7 @@ function Card({
   dot,
   dotTitle,
   dead,
+  showDesc,
   canMenu,
   onOpen,
   onMenu,
@@ -795,6 +797,7 @@ function Card({
   dot: string
   dotTitle: string
   dead: boolean
+  showDesc: boolean
   canMenu: boolean
   onOpen: (item: Item) => void
   onMenu: (item: Item, x: number, y: number) => void
@@ -895,9 +898,11 @@ function Card({
           >
             {item.name}
           </div>
-          <div className="mt-[3px] line-clamp-2 text-xs leading-[1.35] text-dim">
-            {item.description || ''}
-          </div>
+          {showDesc && (
+            <div className="mt-[3px] line-clamp-2 text-xs leading-[1.35] text-dim">
+              {item.description || ''}
+            </div>
+          )}
         </div>
       </div>
     </div>

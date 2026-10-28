@@ -228,6 +228,9 @@ var defaultSettings = map[string]string{
 	"docker_enabled":      "1",
 	"show_disabled":       "1",                          // 管理员首页是否置灰显示禁用卡；1=显示（便于管理核对）
 	"show_disabled_guest": "0",                          // 访客首页是否置灰显示禁用卡；0=不显示（访客看不到，仅管理员可选开）
+	"show_desc_admin":     "1",                          // 管理员首页是否显示卡片描述
+	"show_desc_user":      "1",                          // 已登录用户（非管理员）首页是否显示卡片描述
+	"show_desc_guest":     "1",                          // 游客（未登录）首页是否显示卡片描述
 	"admin_groups":        "admins",                     // 拥有管理后台权限的 SSO 用户组（逗号分隔，取自 SSO 网关 Remote-Groups）
 	"known_groups":        "admins,family,guest",        // 卡片「访问组」的候选组（仅作下拉提示，不限制自由填写；guest 为免登录访客身份）
 	"probe_enabled":       "0",                          // 可达性检测站点总闸：0=关闭（默认，避免自签 https 等被误判为不可达）；关闭时一律不探测，分组配置不生效

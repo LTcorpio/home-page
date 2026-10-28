@@ -29,6 +29,9 @@ interface Form {
   docker: boolean
   showDisabled: boolean
   showDisabledGuest: boolean
+  descAdmin: boolean
+  descUser: boolean
+  descGuest: boolean
   adminGroups: string
   knownGroups: string
   authPortal: string
@@ -47,6 +50,9 @@ function toForm(s: Record<string, string>): Form {
     docker: s.docker_enabled !== '0',
     showDisabled: s.show_disabled === '1',
     showDisabledGuest: s.show_disabled_guest === '1',
+    descAdmin: s.show_desc_admin !== '0',
+    descUser: s.show_desc_user !== '0',
+    descGuest: s.show_desc_guest !== '0',
     adminGroups: s.admin_groups || 'admins',
     knownGroups: s.known_groups || '',
     authPortal: s.auth_portal || '',
@@ -175,6 +181,9 @@ export default function SettingsPanel({ settings, onChanged }: Props) {
         docker_enabled: form.docker ? '1' : '0',
         show_disabled: form.showDisabled ? '1' : '0',
         show_disabled_guest: form.showDisabledGuest ? '1' : '0',
+        show_desc_admin: form.descAdmin ? '1' : '0',
+        show_desc_user: form.descUser ? '1' : '0',
+        show_desc_guest: form.descGuest ? '1' : '0',
         admin_groups: form.adminGroups.trim() || 'admins',
         known_groups: form.knownGroups.trim(),
         auth_portal: form.authPortal.trim(),
@@ -298,6 +307,27 @@ export default function SettingsPanel({ settings, onChanged }: Props) {
             label="访客首页显示禁用卡片"
             checked={form.showDisabledGuest}
             onChange={(v) => setForm({ ...form, showDisabledGuest: v })}
+          />
+        </div>
+      </div>
+
+      <div className={PANEL}>
+        <h3 className={PANEL_TITLE}>卡片描述</h3>
+        <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
+          <ToggleRow
+            label="管理员显示描述"
+            checked={form.descAdmin}
+            onChange={(v) => setForm({ ...form, descAdmin: v })}
+          />
+          <ToggleRow
+            label="用户显示描述"
+            checked={form.descUser}
+            onChange={(v) => setForm({ ...form, descUser: v })}
+          />
+          <ToggleRow
+            label="游客显示描述"
+            checked={form.descGuest}
+            onChange={(v) => setForm({ ...form, descGuest: v })}
           />
         </div>
       </div>
